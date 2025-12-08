@@ -1,0 +1,54 @@
+# Derlenmiş dosyalar
+*.o
+*.out
+*.exe
+procx
+
+# Shared library dosyaları
+*.so
+*.a
+*.dylib
+
+# Debugging dosyaları
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dump
+core
+core.*
+
+# Editor dosyaları
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Geçici dosyalar
+*.tmp
+*.bak
+*.log
+
+# Dependency directories
+node_modules/
+venv/
+__pycache__/
+
+# Build dizinleri
+build/
+dist/
+bin/
+obj/
+
+# Test coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# System dosyaları
+Thumbs.db
+Desktop.ini
