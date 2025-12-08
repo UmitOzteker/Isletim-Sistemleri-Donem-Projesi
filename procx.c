@@ -14,7 +14,29 @@
 #include <pthread.h>   // pthread_create, pthread_join
 #include <sys/wait.h>  // waitpid
 
+    // --- ENUM VE SABITLER ---
 
+// Proje için gerekli dosya isimleri ve anahtarlar
+#define SHM_NAME "/procx_shm"      // Shared Memory Adı (POSIX standardı) [cite: 1925]
+#define SEM_NAME "/procx_sem"      // Semaphore Adı [cite: 1925]
+#define MQ_KEY_FILE "procx_mq_key" // Message Queue ftok dosyası (Lab 8 mantığı) [cite: 1116]
+#define PROJ_ID 65                 // ftok proje ID
+
+// ProcessMode Tanımı (Attached/Detached)
+typedef enum { 
+    ATTACHED = 0, 
+    DETACHED = 1 
+} ProcessMode;
+
+// ProcessStatus Tanımı (Running/Terminated)
+typedef enum { 
+    RUNNING = 0, 
+    TERMINATED = 1 
+} ProcessStatus;
+
+// Mesaj Komutları
+#define CMD_START 1
+#define CMD_TERMINATE 2
 // Process bilgisi
 typedef struct {
  pid_t pid; // Process ID
