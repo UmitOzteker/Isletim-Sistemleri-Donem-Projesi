@@ -13,6 +13,8 @@
 #include <signal.h>    // kill, SIGTERM
 #include <pthread.h>   // pthread_create, pthread_join
 #include <sys/wait.h>  // waitpid
+#include <sys/ipc.h>    // ftok, shmget, shmat, shmctl
+#include <sys/shm.h>   // shmget, shmat, shmctl
 
     // --- ENUM VE SABITLER ---
 
@@ -60,7 +62,50 @@ typedef struct {
  pid_t target_pid; // Hedef process PID
 } Message;
 
-volatile sig_atomic_t interrupt_count = 0;
+volatile sig_atomic_t interrupt_count = 0; // SIGINT kesme sayacı
+
+// Global değişkenler
+int shm_fd; // Shared Memory dosya tanıtıcısı
+SharedData *shared_data; // Paylaşılan bellek işaretçisi
+sem_t *sem; // Semaphore işaretçisi
+int msqid; // Message Queue ID
+int shmid; // Shared Memory ID
+key_t key; // Message Queue anahtarı
+
+void init_resources() {
+    key = ftok("procx_mq_key", 65); // Mesaj kuyruğu anahtarı oluştur
+
+    if (key == -1) {
+         perror("ftok failed");
+         exit(1);
+    }
+
+    shmid = shmget(key, sizeof(SharedData), 0666 | IPC_CREAT); // Paylaşılan bellek oluştur
+
+    if (shmid == -1) {
+        perror("shmget failed");
+        exit(1);
+    }
+
+    shared_data = (SharedData *) shmat(shmid, (void*)0, 0); // Paylaşılan belleği ata
+
+    if (shared_data == (SharedData *)(-1)) {
+        perror("shmat failed");
+        exit(1);
+    }
+
+    msqid = msgget(key, 0666 | IPC_CREAT); // Mesaj kuyruğu oluştur
+    if (msqid == -1) {
+        perror("msgget failed");
+        exit(1);
+    }
+    sem = sem_open(SEM_NAME, O_CREAT, 0644, 1); // Semaphore oluştur
+    if (sem == SEM_FAILED) {
+        perror("sem_open failed");
+        exit(1);
+    }
+}
+
 
 void sigint_handler(int signum) {
     interrupt_count++;
@@ -93,6 +138,8 @@ int main() {
         perror("Error setting up sigaction");
         return 1;
     }
+
+    init_resources();
 
     printf("[Main] Process started (PID: %d). Waiting for signals...\n", getpid());
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
