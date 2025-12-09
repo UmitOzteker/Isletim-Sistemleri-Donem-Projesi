@@ -99,6 +99,7 @@ void init_resources() {
         perror("msgget failed");
         exit(1);
     }
+    
     sem = sem_open(SEM_NAME, O_CREAT, 0644, 1); // Semaphore oluştur
     if (sem == SEM_FAILED) {
         perror("sem_open failed");
@@ -106,8 +107,14 @@ void init_resources() {
     }
 }
 
+void cleanup_resources() { // Kaynakları temizle
+    shmctl(shmid, IPC_RMID, NULL); // Paylaşılan belleği kaldır
+    msgctl(msqid, IPC_RMID, NULL); // Mesaj kuyruğunu kaldır
+    sem_close(sem); // Semaphore'u kapat,
+    sem_unlink(SEM_NAME); // Semaphore'u kaldır
+}
 
-void sigint_handler(int signum) {
+void sigint_handler(int signum) { // SIGINT işleyici
     interrupt_count++;
     
     if (interrupt_count == 1) {
@@ -116,11 +123,12 @@ void sigint_handler(int signum) {
         printf("\n[Handler] Caught SIGINT (2/3). Press Ctrl+C 1 more time to exit.\n");
     } else {
         printf("\n[Handler] Caught SIGINT (3/3). Exiting now.\n");
-        exit(0); // TR: Güvenli çıkış / EN: Clean exit
+        cleanup_resources(); // Kaynakları temizle
+        exit(0);
     }
 }
 
-int main() {
+int main() { // Ana fonksiyon
 
     struct sigaction sa;
     
