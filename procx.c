@@ -128,9 +128,31 @@ void sigint_handler(int signum) { // SIGINT işleyici
     }
 }
 
+void* monitor_thread(void* arg){ // İzleme iş parçacığı
+    printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
+    while(1){
+        sleep(5);
+        printf("[Monitor] Monitoring processes...\n");
+    }
+    // TODO: Zombi processları temizle (waitpid)
+    // TODO: Bitmiş processların status'ünü güncelle
+}
+
+void* ipc_listener_thread(void* arg){ // IPC dinleyici iş parçacığı
+    printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
+    while(1){
+        sleep(5);
+        printf("[IPC Listener] Listening for IPC messages...\n");
+        // TODO: msgrcv() ile mesaj dinle
+        // TODO: CMD_START/CMD_TERMINATE komutlarını işle
+    }
+}
+
 int main() { // Ana fonksiyon
 
     struct sigaction sa;
+    pthread_t monitor_tid, ipc_listener_tid;
+    int choice;
     
     // TR: İşleyici fonksiyonumuzu ata
     sa.sa_handler = sigint_handler;
@@ -139,7 +161,7 @@ int main() { // Ana fonksiyon
     sigemptyset(&sa.sa_mask);
     
     // TR: Ekstra bayrak yok
-    sa.sa_flags = 0;
+    sa.sa_flags = 0; 
 
     // TR: SIGINT (Ctrl+C) sinyali için 'sa' ayarlarını kaydet.
     if (sigaction(SIGINT, &sa, NULL) == -1) {
@@ -147,13 +169,53 @@ int main() { // Ana fonksiyon
         return 1;
     }
 
-    init_resources();
+    init_resources(); // Kaynakları başlat
+
+    pthread_create(&monitor_tid, NULL, monitor_thread, NULL); // İzleme iş parçacığını başlat
+    pthread_create(&ipc_listener_tid, NULL, ipc_listener_thread, NULL); // IPC dinleyici iş parçacığını başlat
 
     printf("[Main] Process started (PID: %d). Waiting for signals...\n", getpid());
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
-    while (1) {
-        // Sonsuz döngü
-        sleep(5);
+
+    while(1) { // Ana menü döngüsü
+        printf("\n╔════════════════════════════════════╗\n");
+        printf("║                                    ║\n");
+        printf("║           ProcX v1.0               ║\n");
+        printf("║                                    ║\n");
+        printf("╠════════════════════════════════════╣\n");
+        printf("║ 1. Yeni Program Çalıştır           ║\n");
+        printf("║ 2. Çalışan Programları Listele     ║\n");
+        printf("║ 3. Program Sonlandır               ║\n");
+        printf("║ 0. Çıkış                           ║\n");
+        printf("╚════════════════════════════════════╝\n");
+
+        printf("Seçiminiz: ");
+
+        scanf("%d", &choice); // Kullanıcıdan seçim al
+        switch(choice) { // Seçime göre işlem yap
+            case 1:
+                printf("Enter command to execute: "); // Yeni program çalıştır
+                // TODO: fork() + execvp() ekle
+                // TODO: ProcessInfo'ya kaydet
+                // TODO: Shared memory'e yaz
+                break;
+            case 2:
+                printf("Listing running programs...\n"); // Çalışan programları listele
+                // TODO: shared_data->processes[] döngüsü ekle
+                // TODO: Aktif processları yazdır
+                break;
+            case 3:
+                printf("Enter PID of program to terminate: "); // Program sonlandır
+                // TODO: PID al, kill(pid, SIGTERM) gönder
+                // TODO: ProcessInfo.status = TERMINATED yap
+                break;
+            case 0:
+                cleanup_resources(); // Kaynakları temizle
+                printf("Exiting ProcX. Goodbye!\n");
+                exit(0);
+            default:
+                printf("Invalid choice. Please try again.\n");
+        }
     }
     return 0;
 }
