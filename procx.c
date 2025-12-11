@@ -229,12 +229,16 @@ void *ipc_listener_thread(void *arg)
         // Mesaj gelene kadar burada bekler, işlemci harcamaz.
         if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1)
         {
-            // Mesaj alındı
-            if (msg.command == CMD_START)
+            if (msg.sender_pid == getpid())
+            {
+                continue; // Kendi mesajlarımızı yoksay
+            }
+
+            if (msg.command == CMD_START) // START komutu
             {
                 printf("\n[IPC Listener] Received START command from PID %d (Ignored - No payload support)\n", msg.sender_pid);
             }
-            else if (msg.command == CMD_TERMINATE)
+            else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
                 printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
 
