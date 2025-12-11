@@ -80,7 +80,8 @@ key_t key;               // Message Queue anahtarı
 void init_resources()
 {
     FILE *fp = fopen("procx_mq_key", "a");
-    if (fp) fclose(fp);
+    if (fp)
+        fclose(fp);
     key = ftok("procx_mq_key", 65); // Mesaj kuyruğu anahtarı oluştur
 
     if (key == -1)
@@ -120,10 +121,13 @@ void init_resources()
     }
 
     sem_wait(sem);
-    if (shared_data->process_count == 0 || shared_data->process_count > 50) {
-        shared_data->process_count = 0;  // İlk kez başlatıyoruz
+    if (shared_data->process_count == 0 || shared_data->process_count > 50)
+    {
+        shared_data->process_count = 0; // İlk kez başlatıyoruz
         printf("[Init] Shared memory initialized.\n");
-    } else {
+    }
+    else
+    {
         printf("[Init] Shared memory already exists with %d processes.\n", shared_data->process_count);
     }
     sem_post(sem);
@@ -203,27 +207,32 @@ void *ipc_listener_thread(void *arg)
             else if (msg.command == CMD_TERMINATE)
             {
                 printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
-                
+
                 //  Fiziksel Öldürme
-                if (kill(msg.target_pid, SIGTERM) == 0) {
-                    
+                if (kill(msg.target_pid, SIGTERM) == 0)
+                {
+
                     sem_wait(sem); // Kilitle
-                    
+
                     int found = 0;
-                    for (int i = 0; i < shared_data->process_count; i++) {
-                        if (shared_data->processes[i].pid == msg.target_pid) {
+                    for (int i = 0; i < shared_data->process_count; i++)
+                    {
+                        if (shared_data->processes[i].pid == msg.target_pid)
+                        {
                             shared_data->processes[i].status = TERMINATED;
                             shared_data->processes[i].is_active = 0;
                             found = 1;
                             break;
                         }
                     }
-                    
+
                     sem_post(sem); // Kilidi aç
 
-                    if (found) printf("[IPC Listener] Process %d terminated and updated via IPC.\n", msg.target_pid);
-                
-                } else {
+                    if (found)
+                        printf("[IPC Listener] Process %d terminated and updated via IPC.\n", msg.target_pid);
+                }
+                else
+                {
                     perror("[IPC Listener] Failed to kill process");
                 }
             }
@@ -231,9 +240,10 @@ void *ipc_listener_thread(void *arg)
         else
         {
             // Mesaj kuyruğu silinmişse veya ciddi hata varsa döngüden çık
-            if (errno != EINTR) { 
+            if (errno != EINTR)
+            {
                 perror("msgrcv failed");
-                break; 
+                break;
             }
         }
     }
@@ -290,51 +300,139 @@ void start_process(char *command, int mode) // Yeni process başlat
     }
 }
 
-int main() // Ana fonksiyon
+void display_menu()
 {
+    printf("\n╔════════════════════════════════════╗\n");
+    printf("║                                    ║\n");
+    printf("║           ProcX v1.0               ║\n");
+    printf("║                                    ║\n");
+    printf("╠════════════════════════════════════╣\n");
+    printf("║ 1. Yeni Program Çalıştır           ║\n");
+    printf("║ 2. Çalışan Programları Listele     ║\n");
+    printf("║ 3. Program Sonlandır               ║\n");
+    printf("║ 0. Çıkış                           ║\n");
+    printf("╚════════════════════════════════════╝\n");
+    printf("Seçiminiz: ");
+}
 
+void handle_start_process()
+{
+    char command[256];
+    int mode;
+
+    printf("Enter command to execute: ");
+    fgets(command, sizeof(command), stdin);
+    command[strcspn(command, "\n")] = 0; // Newline kaldır
+
+    printf("Mode (0=ATTACHED, 1=DETACHED): ");
+    scanf("%d", &mode);
+
+    start_process(command, mode);
+}
+
+void handle_list_process()
+{
+    printf("Listing running programs...\n"); // Çalışan programları listele
+    sem_wait(sem);                           // Semaphore kilitle
+    printf("\n");
+    printf("╔═════════════════════════════════════════════════════════════════════════╗\n");
+    printf("║                            ÇALIŞAN PROGRAMLAR                           ║\n");
+    printf("╠═════════╤══════════════════════╤══════════╤═════════╤═══════════════╣\n");
+    printf("║ PID     │ Command              │ Mode     │ Owner   │ Süre          ║\n");
+    printf("╠═════════╪══════════════════════╪══════════╪═════════╪═══════════════╣\n");
+    for (int i = 0; i < shared_data->process_count; i++)
+    {
+        if (shared_data->processes[i].is_active)
+        {
+            time_t now = time(NULL);                                               // Şu anki zaman
+            double duration = difftime(now, shared_data->processes[i].start_time); // Süre hesapla
+            printf("║ %-7d │ %-20.20s │ %-8s │ %-7d │ %-9.0f sn ║\n",
+                   shared_data->processes[i].pid,
+                   shared_data->processes[i].command,
+                   (shared_data->processes[i].mode == ATTACHED) ? "Attached" : "Detached",
+                   shared_data->processes[i].owner_pid,
+                   duration);
+        }
+    }
+    printf("╚═════════╧══════════════════════╧══════════╧═════════╧═══════════════╝\n");
+    sem_post(sem); // Semaphore aç
+}
+
+void handle_terminate_process()
+{
+    pid_t target_pid;
+    printf("Enter PID of program to terminate: "); // Program sonlandır
+    scanf("%d", &target_pid);
+    if (kill(target_pid, SIGTERM) == 0)
+    {
+        printf("Sent termination signal to PID %d\n", target_pid);
+        sem_wait(sem); // Semaphore kilitle
+        int found = 0;
+        for (int i = 0; i < shared_data->process_count; i++)
+        {
+            if (shared_data->processes[i].pid == target_pid)
+            {
+                shared_data->processes[i].status = TERMINATED;
+                shared_data->processes[i].is_active = 0;
+
+                found = 1;
+                break;
+            }
+        }
+        sem_post(sem); // Semaphore aç
+        if (found)
+        {
+            printf("Process %d marked as terminated in shared memory.\n", target_pid);
+        }
+        else
+        {
+            printf("Process %d not found in shared memory.\n", target_pid);
+        }
+    }
+    else
+    {
+        perror("Failed to send termination signal");
+    }
+}
+
+void setup_signal_handlers()
+{
     struct sigaction sa;
-    pthread_t monitor_tid, ipc_listener_tid;
-    int choice;
-
-    // TR: İşleyici fonksiyonumuzu ata
     sa.sa_handler = sigint_handler;
-
-    // TR: Güvenli olması için tüm sinyal bayraklarını sıfırla
     sigemptyset(&sa.sa_mask);
-
-    // TR: Ekstra bayrak yok
     sa.sa_flags = 0;
 
-    // TR: SIGINT (Ctrl+C) sinyali için 'sa' ayarlarını kaydet.
     if (sigaction(SIGINT, &sa, NULL) == -1)
     {
         perror("Error setting up sigaction");
-        return 1;
+        exit(1);
     }
+}
+
+void start_threads(pthread_t *monitor_tid, pthread_t *ipc_listener_tid)
+{
+    pthread_create(monitor_tid, NULL, monitor_thread, NULL);           // İzleme iş parçacığını başlat
+    pthread_create(ipc_listener_tid, NULL, ipc_listener_thread, NULL); // IPC dinleyici iş parçacığını başlat
+}
+
+int main() // Ana fonksiyon
+{
+
+    pthread_t monitor_tid, ipc_listener_tid;
+    int choice;
+
+    setup_signal_handlers(); // Sinyal işleyicilerini ayarla
 
     init_resources(); // Kaynakları başlat
 
-    pthread_create(&monitor_tid, NULL, monitor_thread, NULL);           // İzleme iş parçacığını başlat
-    pthread_create(&ipc_listener_tid, NULL, ipc_listener_thread, NULL); // IPC dinleyici iş parçacığını başlat
+    start_threads(&monitor_tid, &ipc_listener_tid);
 
     printf("[Main] Process started (PID: %d). Waiting for signals...\n", getpid());
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
 
     while (1)
-    { // Ana menü döngüsü
-        printf("\n╔════════════════════════════════════╗\n");
-        printf("║                                    ║\n");
-        printf("║           ProcX v1.0               ║\n");
-        printf("║                                    ║\n");
-        printf("╠════════════════════════════════════╣\n");
-        printf("║ 1. Yeni Program Çalıştır           ║\n");
-        printf("║ 2. Çalışan Programları Listele     ║\n");
-        printf("║ 3. Program Sonlandır               ║\n");
-        printf("║ 0. Çıkış                           ║\n");
-        printf("╚════════════════════════════════════╝\n");
-
-        printf("Seçiminiz: ");
+    {                   // Ana menü döngüsü
+        display_menu(); // Menü göster
 
         scanf("%d", &choice); // Kullanıcıdan seçim al
         while (getchar() != '\n')
@@ -344,80 +442,15 @@ int main() // Ana fonksiyon
         {
         case 1:
         {
-            char command[256];
-            int mode;
-
-            printf("Enter command to execute: ");
-            fgets(command, sizeof(command), stdin);
-            command[strcspn(command, "\n")] = 0; // Newline kaldır
-
-            printf("Mode (0=ATTACHED, 1=DETACHED): ");
-            scanf("%d", &mode);
-
-            start_process(command, mode);
+            handle_start_process(); // Yeni process başlat
             break;
         }
         case 2:
-            printf("Listing running programs...\n"); // Çalışan programları listele
-            sem_wait(sem);                           // Semaphore kilitle
-            printf("\n");
-            printf("╔═════════════════════════════════════════════════════════════════════════╗\n");
-            printf("║                            ÇALIŞAN PROGRAMLAR                           ║\n");
-            printf("╠═════════╤══════════════════════╤══════════╤═════════╤═══════════════╣\n");
-            printf("║ PID     │ Command              │ Mode     │ Owner   │ Süre          ║\n");
-            printf("╠═════════╪══════════════════════╪══════════╪═════════╪═══════════════╣\n");
-            for (int i = 0; i < shared_data->process_count; i++)
-            {
-                if (shared_data->processes[i].is_active)
-                {
-                    time_t now = time(NULL);                                               // Şu anki zaman
-                    double duration = difftime(now, shared_data->processes[i].start_time); // Süre hesapla
-                    printf("║ %-7d │ %-20.20s │ %-8s │ %-7d │ %-9.0f sn ║\n",
-                           shared_data->processes[i].pid,
-                           shared_data->processes[i].command,
-                           (shared_data->processes[i].mode == ATTACHED) ? "Attached" : "Detached",
-                           shared_data->processes[i].owner_pid,
-                           duration);
-                }
-            }
-            printf("╚═════════╧══════════════════════╧══════════╧═════════╧═══════════════╝\n");
-            sem_post(sem); // Semaphore aç
+            handle_list_process(); // Çalışan processleri listele
             break;
         case 3:
         {
-            pid_t target_pid;
-            printf("Enter PID of program to terminate: "); // Program sonlandır
-            scanf("%d", &target_pid);
-            if (kill(target_pid, SIGTERM) == 0)
-            {
-                printf("Sent termination signal to PID %d\n", target_pid);
-                sem_wait(sem); // Semaphore kilitle
-                int found = 0;
-                for (int i = 0; i < shared_data->process_count; i++)
-                {
-                    if (shared_data->processes[i].pid == target_pid)
-                    {
-                        shared_data->processes[i].status = TERMINATED;
-                        shared_data->processes[i].is_active = 0;
-
-                        found = 1;
-                        break;
-                    }
-                }
-                sem_post(sem); // Semaphore aç
-                if (found)
-                {
-                    printf("Process %d marked as terminated in shared memory.\n", target_pid);
-                }
-                else
-                {
-                    printf("Process %d not found in shared memory.\n", target_pid);
-                }
-            }
-            else
-            {
-                perror("Failed to send termination signal");
-            }
+            handle_terminate_process(); // Process sonlandır
             break;
         }
         case 0:
