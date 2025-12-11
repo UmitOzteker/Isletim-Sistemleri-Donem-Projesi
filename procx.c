@@ -294,6 +294,8 @@ int main() // Ana fonksiyon
             printf("╠═════════╪══════════════════════╪══════════╪═════════╪═══════════════╣\n");
             for (int i = 0; i < shared_data->process_count; i++){
                 if (shared_data->processes[i].is_active){
+                    time_t now = time(NULL); // Şu anki zaman
+                    double duration = difftime(now, shared_data->processes[i].start_time); // Süre hesapla
                     printf("║ %-7d │ %-20.20s │ %-8s │ %-7d │ %-9.0f sn ║\n",
                            shared_data->processes[i].pid,
                            shared_data->processes[i].command,
@@ -305,11 +307,35 @@ int main() // Ana fonksiyon
             printf("╚═════════╧══════════════════════╧══════════╧═════════╧═══════════════╝\n");
             sem_post(sem); // Semaphore aç
             break;
-        case 3:
+        case 3: {
+            pid_t target_pid;
             printf("Enter PID of program to terminate: "); // Program sonlandır
-            // TODO: PID al, kill(pid, SIGTERM) gönder
-            // TODO: ProcessInfo.status = TERMINATED yap
+            scanf("%d", &target_pid);
+            if(kill(target_pid, SIGTERM) == 0){
+                printf("Sent termination signal to PID %d\n", target_pid);
+                sem_wait(sem); // Semaphore kilitle
+                int found = 0;
+                for (int i = 0; i < shared_data->process_count; i++){
+                    if (shared_data->processes[i].pid == target_pid){
+                        shared_data->processes[i].status = TERMINATED;
+                        shared_data->processes[i].is_active = 0;
+                        
+                        found = 1;
+                        break;
+                    }
+                }
+                sem_post(sem); // Semaphore aç
+                if (found)
+                {
+                    printf("Process %d marked as terminated in shared memory.\n", target_pid);
+                } else {
+                    printf("Process %d not found in shared memory.\n", target_pid);
+                }   
+            } else {
+                perror("Failed to send termination signal");
+            }
             break;
+        }
         case 0:
             cleanup_resources(); // Kaynakları temizle
             printf("Exiting ProcX. Goodbye!\n");
