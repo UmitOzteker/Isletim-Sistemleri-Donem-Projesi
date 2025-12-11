@@ -79,6 +79,8 @@ key_t key;               // Message Queue anahtarı
 
 void init_resources()
 {
+    FILE *fp = fopen("procx_mq_key", "a");
+    if (fp) fclose(fp);
     key = ftok("procx_mq_key", 65); // Mesaj kuyruğu anahtarı oluştur
 
     if (key == -1)
@@ -116,6 +118,15 @@ void init_resources()
         perror("sem_open failed");
         exit(1);
     }
+
+    sem_wait(sem);
+    if (shared_data->process_count == 0 || shared_data->process_count > 50) {
+        shared_data->process_count = 0;  // İlk kez başlatıyoruz
+        printf("[Init] Shared memory initialized.\n");
+    } else {
+        printf("[Init] Shared memory already exists with %d processes.\n", shared_data->process_count);
+    }
+    sem_post(sem);
 }
 
 void cleanup_resources()
@@ -171,17 +182,62 @@ void *monitor_thread(void *arg)
         }
         sleep(3); // 3 saniye bekle
     }
+    return NULL;
 }
 
 void *ipc_listener_thread(void *arg)
 { // IPC dinleyici iş parçacığı
+    Message msg;
     printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
+
     while (1)
     {
-        sleep(5);
-        // TODO: msgrcv() ile mesaj dinle
-        // TODO: CMD_START/CMD_TERMINATE komutlarını işle
+        // Mesaj gelene kadar burada bekler, işlemci harcamaz.
+        if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1)
+        {
+            // Mesaj alındı
+            if (msg.command == CMD_START)
+            {
+                printf("\n[IPC Listener] Received START command from PID %d (Ignored - No payload support)\n", msg.sender_pid);
+            }
+            else if (msg.command == CMD_TERMINATE)
+            {
+                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
+                
+                //  Fiziksel Öldürme
+                if (kill(msg.target_pid, SIGTERM) == 0) {
+                    
+                    sem_wait(sem); // Kilitle
+                    
+                    int found = 0;
+                    for (int i = 0; i < shared_data->process_count; i++) {
+                        if (shared_data->processes[i].pid == msg.target_pid) {
+                            shared_data->processes[i].status = TERMINATED;
+                            shared_data->processes[i].is_active = 0;
+                            found = 1;
+                            break;
+                        }
+                    }
+                    
+                    sem_post(sem); // Kilidi aç
+
+                    if (found) printf("[IPC Listener] Process %d terminated and updated via IPC.\n", msg.target_pid);
+                
+                } else {
+                    perror("[IPC Listener] Failed to kill process");
+                }
+            }
+        }
+        else
+        {
+            // Mesaj kuyruğu silinmişse veya ciddi hata varsa döngüden çık
+            if (errno != EINTR) { 
+                perror("msgrcv failed");
+                break; 
+            }
+        }
     }
+    return NULL;
 }
 
 void start_process(char *command, int mode) // Yeni process başlat
