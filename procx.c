@@ -148,13 +148,29 @@ void sigint_handler(int signum)
 
 void *monitor_thread(void *arg)
 { // İzleme iş parçacığı
+    int status;
+    pid_t result;
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
     while (1)
     {
-        sleep(5);
+        result = waitpid(-1, &status, WNOHANG); // Bitmiş child processları beklemeden kontrol et
+        if (result > 0)
+        {
+            sem_wait(sem);
+            for (int i = 0; i < shared_data->process_count; i++)
+            {
+                if (shared_data->processes[i].pid == result) // Eşleşen process bulundu
+                {
+                    shared_data->processes[i].status = TERMINATED;
+                    shared_data->processes[i].is_active = 0;
+                    printf("[Monitor] Process %d has terminated. Updated shared memory.\n", result);
+                    break;
+                }
+            }
+            sem_post(sem);
+        }
+        sleep(3); // 3 saniye bekle
     }
-    // TODO: Zombi processları temizle (waitpid)
-    // TODO: Bitmiş processların status'ünü güncelle
 }
 
 void *ipc_listener_thread(void *arg)
@@ -168,7 +184,7 @@ void *ipc_listener_thread(void *arg)
     }
 }
 
-void start_process(char *command, int mode)
+void start_process(char *command, int mode) // Yeni process başlat
 {
     pid_t pid = fork();
     if (pid < 0)
@@ -219,7 +235,7 @@ void start_process(char *command, int mode)
 }
 
 int main() // Ana fonksiyon
-{ 
+{
 
     struct sigaction sa;
     pthread_t monitor_tid, ipc_listener_tid;
@@ -265,11 +281,13 @@ int main() // Ana fonksiyon
         printf("Seçiminiz: ");
 
         scanf("%d", &choice); // Kullanıcıdan seçim al
-        while (getchar() != '\n' ); // Giriş tamponunu temizle
-        
+        while (getchar() != '\n')
+            ; // Giriş tamponunu temizle
+
         switch (choice) // Seçime göre işlem yap
-        { 
-        case 1: {
+        {
+        case 1:
+        {
             char command[256];
             int mode;
 
@@ -285,16 +303,18 @@ int main() // Ana fonksiyon
         }
         case 2:
             printf("Listing running programs...\n"); // Çalışan programları listele
-            sem_wait(sem); // Semaphore kilitle
+            sem_wait(sem);                           // Semaphore kilitle
             printf("\n");
             printf("╔═════════════════════════════════════════════════════════════════════════╗\n");
             printf("║                            ÇALIŞAN PROGRAMLAR                           ║\n");
             printf("╠═════════╤══════════════════════╤══════════╤═════════╤═══════════════╣\n");
             printf("║ PID     │ Command              │ Mode     │ Owner   │ Süre          ║\n");
             printf("╠═════════╪══════════════════════╪══════════╪═════════╪═══════════════╣\n");
-            for (int i = 0; i < shared_data->process_count; i++){
-                if (shared_data->processes[i].is_active){
-                    time_t now = time(NULL); // Şu anki zaman
+            for (int i = 0; i < shared_data->process_count; i++)
+            {
+                if (shared_data->processes[i].is_active)
+                {
+                    time_t now = time(NULL);                                               // Şu anki zaman
                     double duration = difftime(now, shared_data->processes[i].start_time); // Süre hesapla
                     printf("║ %-7d │ %-20.20s │ %-8s │ %-7d │ %-9.0f sn ║\n",
                            shared_data->processes[i].pid,
@@ -307,19 +327,23 @@ int main() // Ana fonksiyon
             printf("╚═════════╧══════════════════════╧══════════╧═════════╧═══════════════╝\n");
             sem_post(sem); // Semaphore aç
             break;
-        case 3: {
+        case 3:
+        {
             pid_t target_pid;
             printf("Enter PID of program to terminate: "); // Program sonlandır
             scanf("%d", &target_pid);
-            if(kill(target_pid, SIGTERM) == 0){
+            if (kill(target_pid, SIGTERM) == 0)
+            {
                 printf("Sent termination signal to PID %d\n", target_pid);
                 sem_wait(sem); // Semaphore kilitle
                 int found = 0;
-                for (int i = 0; i < shared_data->process_count; i++){
-                    if (shared_data->processes[i].pid == target_pid){
+                for (int i = 0; i < shared_data->process_count; i++)
+                {
+                    if (shared_data->processes[i].pid == target_pid)
+                    {
                         shared_data->processes[i].status = TERMINATED;
                         shared_data->processes[i].is_active = 0;
-                        
+
                         found = 1;
                         break;
                     }
@@ -328,10 +352,14 @@ int main() // Ana fonksiyon
                 if (found)
                 {
                     printf("Process %d marked as terminated in shared memory.\n", target_pid);
-                } else {
+                }
+                else
+                {
                     printf("Process %d not found in shared memory.\n", target_pid);
-                }   
-            } else {
+                }
+            }
+            else
+            {
                 perror("Failed to send termination signal");
             }
             break;
