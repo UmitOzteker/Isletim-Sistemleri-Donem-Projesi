@@ -152,7 +152,6 @@ void *monitor_thread(void *arg)
     while (1)
     {
         sleep(5);
-        printf("[Monitor] Monitoring processes...\n");
     }
     // TODO: Zombi processları temizle (waitpid)
     // TODO: Bitmiş processların status'ünü güncelle
@@ -164,7 +163,6 @@ void *ipc_listener_thread(void *arg)
     while (1)
     {
         sleep(5);
-        printf("[IPC Listener] Listening for IPC messages...\n");
         // TODO: msgrcv() ile mesaj dinle
         // TODO: CMD_START/CMD_TERMINATE komutlarını işle
     }
@@ -220,8 +218,8 @@ void start_process(char *command, int mode)
     }
 }
 
-int main()
-{ // Ana fonksiyon
+int main() // Ana fonksiyon
+{ 
 
     struct sigaction sa;
     pthread_t monitor_tid, ipc_listener_tid;
@@ -267,14 +265,15 @@ int main()
         printf("Seçiminiz: ");
 
         scanf("%d", &choice); // Kullanıcıdan seçim al
-        switch (choice)
-        { // Seçime göre işlem yap
+        while (getchar() != '\n' ); // Giriş tamponunu temizle
+        
+        switch (choice) // Seçime göre işlem yap
+        { 
         case 1: {
             char command[256];
             int mode;
 
             printf("Enter command to execute: ");
-            getchar(); // scanf'den kalan newline'ı temizle
             fgets(command, sizeof(command), stdin);
             command[strcspn(command, "\n")] = 0; // Newline kaldır
 
