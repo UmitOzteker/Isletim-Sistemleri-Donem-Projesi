@@ -343,6 +343,26 @@ void start_process(char *command, int mode) // Yeni process başlat
         msg.target_pid = pid;
 
         msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Başlatma mesajı gönder
+
+        if(mode == ATTACHED){
+            int status;
+            waitpid(pid, &status, 0); // Attached modda bekle
+
+            printf("[Main] Attached process (PID: %d) has terminated.\n", pid);
+
+            sem_wait(sem); // Semaphore kilitle
+            for (int i = 0; i < shared_data->process_count; i++){
+                if(shared_data[i].processes[i].pid == pid){
+                    shared_data->processes[i].status = TERMINATED;
+                    shared_data->processes[i].is_active = 0;
+                    break;
+                }
+            }
+            sem_post(sem); // Semaphore aç
+
+            msg.command = CMD_TERMINATE; // TERMINATE komutu
+            msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Terminate mesajı gönder
+        }
     }
 }
 
