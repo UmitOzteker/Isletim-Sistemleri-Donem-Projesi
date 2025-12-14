@@ -13,8 +13,6 @@
 #include <signal.h>    // kill, SIGTERM
 #include <pthread.h>   // pthread_create, pthread_join
 #include <sys/wait.h>  // waitpid
-#include <sys/ipc.h>   // ftok, shmget, shmat, shmctl
-#include <sys/shm.h>   // shmget, shmat, shmctl
 
 // --- ENUM VE SABITLER ---
 
@@ -70,12 +68,11 @@ typedef struct
 volatile sig_atomic_t interrupt_count = 0; // SIGINT kesme sayacı
 
 // Global değişkenler
-int shm_fd;              // Shared Memory dosya tanıtıcısı
-SharedData *shared_data; // Paylaşılan bellek işaretçisi
-sem_t *sem;              // Semaphore işaretçisi
-int msqid;               // Message Queue ID
-int shmid;               // Shared Memory ID
-key_t key;               // Message Queue anahtarı
+int shm_fd;                        // Shared Memory dosya tanıtıcısı
+SharedData *shared_data;           // Paylaşılan bellek işaretçisi
+sem_t *sem;                        // Semaphore işaretçisi
+int msqid;                         // Message Queue ID
+key_t key;                         // Message Queue anahtarı
 volatile sig_atomic_t running = 1; // Ana döngü kontrolü
 
 void init_resources()
@@ -91,21 +88,28 @@ void init_resources()
         exit(1);
     }
 
-    shmid = shmget(key, sizeof(SharedData), 0666 | IPC_CREAT); // Paylaşılan bellek oluştur
-
-    if (shmid == -1)
+    shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666); // Paylaşılan bellek oluştur
+    if (shm_fd == -1)
     {
-        perror("shmget failed");
+        perror("shm_open failed");
         exit(1);
     }
 
-    shared_data = (SharedData *)shmat(shmid, (void *)0, 0); // Paylaşılan belleği ata
-
-    if (shared_data == (SharedData *)(-1))
+    int res = ftruncate(shm_fd, sizeof(SharedData)); // Paylaşılan bellek boyutunu ayarla
+    if (res == -1)
     {
-        perror("shmat failed");
+        perror("ftruncate failed");
         exit(1);
     }
+
+    shared_data = mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0); // Paylaşılan belleği eşleştir
+    if (shared_data == MAP_FAILED)
+    {
+        perror("mmap failed");
+        exit(1);
+    }
+
+    close(shm_fd); // Dosya tanıtıcısını kapat
 
     msqid = msgget(key, 0666 | IPC_CREAT); // Mesaj kuyruğu oluştur
     if (msqid == -1)
@@ -155,10 +159,11 @@ void cleanup_resources() // Kaynakları temizle
     }
     // Semaphore kilitle
 
-    shmctl(shmid, IPC_RMID, NULL); // Paylaşılan belleği kaldır
-    msgctl(msqid, IPC_RMID, NULL); // Mesaj kuyruğunu kaldır
-    sem_close(sem);                // Semaphore'u kapat,
-    sem_unlink(SEM_NAME);          // Semaphore'u kaldır
+    munmap(shared_data, sizeof(SharedData)); // Paylaşılan belleği eşleştirmeyi kaldır
+    shm_unlink(SHM_NAME);                    // Paylaşılan belleği kaldır
+    msgctl(msqid, IPC_RMID, NULL);           // Mesaj kuyruğunu kaldır
+    sem_close(sem);                          // Semaphore'u kapat,
+    sem_unlink(SEM_NAME);                    // Semaphore'u kaldır
 
     printf("[Cleanup] Resources cleaned up successfully.\n");
 }
@@ -241,7 +246,7 @@ void *ipc_listener_thread(void *arg)
             }
             else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
-                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", 
+                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n",
                        msg.target_pid, msg.sender_pid);
 
                 // Fiziksel Öldürme
@@ -295,7 +300,7 @@ void *ipc_listener_thread(void *arg)
             }
         }
     }
-    
+
     printf("[IPC Listener] Thread terminating.\n");
     return NULL;
 }
@@ -360,15 +365,18 @@ void start_process(char *command, int mode) // Yeni process başlat
 
         msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Başlatma mesajı gönder
 
-        if(mode == ATTACHED){
+        if (mode == ATTACHED)
+        {
             int status;
             waitpid(pid, &status, 0); // Attached modda bekle
 
             printf("[Main] Attached process (PID: %d) has terminated.\n", pid);
 
             sem_wait(sem); // Semaphore kilitle
-            for (int i = 0; i < shared_data->process_count; i++){
-                if(shared_data[i].processes[i].pid == pid){
+            for (int i = 0; i < shared_data->process_count; i++)
+            {
+                if (shared_data->processes[i].pid == pid)
+                {
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
                     break;
@@ -376,7 +384,7 @@ void start_process(char *command, int mode) // Yeni process başlat
             }
             sem_post(sem); // Semaphore aç
 
-            msg.command = CMD_TERMINATE; // TERMINATE komutu
+            msg.command = CMD_TERMINATE;                            // TERMINATE komutu
             msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Terminate mesajı gönder
         }
     }
@@ -536,12 +544,12 @@ int main() // Ana fonksiyon
             break;
         }
         case 0:
-            running = 0; // Döngüyü durdur       
-            cleanup_resources(); // Kaynakları temizle
-            pthread_cancel(monitor_tid); // İzleme iş parçacığını iptal et
-            pthread_cancel(ipc_listener_tid); // IPC dinleyici iş parçacığını iptal
-            pthread_join(monitor_tid, NULL); // İzleme iş parçacığını bekle
+            running = 0;                          // Döngüyü durdur
+            pthread_cancel(monitor_tid);          // İzleme iş parçacığını iptal et
+            pthread_cancel(ipc_listener_tid);     // IPC dinleyici iş parçacığını iptal
+            pthread_join(monitor_tid, NULL);      // İzleme iş parçacığını bekle
             pthread_join(ipc_listener_tid, NULL); // IPC dinleyici iş parçacığını bekle
+            cleanup_resources();                  // Kaynakları temizle
             printf("Exiting ProcX. Goodbye!\n");
             exit(0);
         default:
