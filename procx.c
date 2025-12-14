@@ -76,6 +76,7 @@ sem_t *sem;              // Semaphore işaretçisi
 int msqid;               // Message Queue ID
 int shmid;               // Shared Memory ID
 key_t key;               // Message Queue anahtarı
+volatile sig_atomic_t running = 1; // Ana döngü kontrolü
 
 void init_resources()
 {
@@ -187,7 +188,7 @@ void *monitor_thread(void *arg)
     int status;
     pid_t result;
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
-    while (1)
+    while (running)
     {
         while ((result = waitpid(-1, &status, WNOHANG)) > 0) // Bitmiş child processları beklemeden kontrol et
         {
@@ -224,7 +225,7 @@ void *ipc_listener_thread(void *arg)
     Message msg;
     printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
 
-    while (1)
+    while (running)
     {
         // Mesaj gelene kadar burada bekler, işlemci harcamaz.
         if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1)
@@ -236,15 +237,17 @@ void *ipc_listener_thread(void *arg)
 
             if (msg.command == CMD_START) // START komutu
             {
-                printf("\n[IPC Listener] Received START command from PID %d (Ignored - No payload support)\n", msg.sender_pid);
+                printf("\n[IPC Listener] Received START command from PID %d\n", msg.sender_pid);
             }
             else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
-                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
+                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n", 
+                       msg.target_pid, msg.sender_pid);
 
-                //  Fiziksel Öldürme
+                // Fiziksel Öldürme
                 if (kill(msg.target_pid, SIGTERM) == 0)
                 {
+                    printf("[IPC Listener] Successfully sent SIGTERM to PID %d\n", msg.target_pid);
 
                     sem_wait(sem); // Kilitle
 
@@ -264,23 +267,36 @@ void *ipc_listener_thread(void *arg)
 
                     if (found)
                         printf("[IPC Listener] Process %d terminated and updated via IPC.\n", msg.target_pid);
+                    else
+                        printf("[IPC Listener] Process %d not found in shared memory.\n", msg.target_pid);
                 }
                 else
                 {
-                    perror("[IPC Listener] Failed to kill process");
+                    perror("[IPC Listener] Failed to send termination signal");
                 }
+            }
+            else
+            {
+                printf("\n[IPC Listener] Unknown command received: %d\n", msg.command);
             }
         }
         else
         {
             // Mesaj kuyruğu silinmişse veya ciddi hata varsa döngüden çık
-            if (errno != EINTR)
+            if (errno == EIDRM || errno == EINVAL)
             {
-                perror("msgrcv failed");
+                printf("[IPC Listener] Message queue removed or invalid. Exiting thread.\n");
+                break;
+            }
+            else if (errno != EINTR && errno != ENOMSG)
+            {
+                perror("[IPC Listener] msgrcv failed");
                 break;
             }
         }
     }
+    
+    printf("[IPC Listener] Thread terminating.\n");
     return NULL;
 }
 
@@ -520,7 +536,12 @@ int main() // Ana fonksiyon
             break;
         }
         case 0:
+            running = 0; // Döngüyü durdur       
             cleanup_resources(); // Kaynakları temizle
+            pthread_cancel(monitor_tid); // İzleme iş parçacığını iptal et
+            pthread_cancel(ipc_listener_tid); // IPC dinleyici iş parçacığını iptal
+            pthread_join(monitor_tid, NULL); // İzleme iş parçacığını bekle
+            pthread_join(ipc_listener_tid, NULL); // IPC dinleyici iş parçacığını bekle
             printf("Exiting ProcX. Goodbye!\n");
             exit(0);
         default:
