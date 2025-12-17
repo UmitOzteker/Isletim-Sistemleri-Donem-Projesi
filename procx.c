@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L // POSIX.1-2008 standardını etkinleştir
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,20 +157,21 @@ void cleanup_resources() // Kaynakları temizle
             }
         }
         sem_post(sem);
+        sem_close(sem);       // Semaphore'u kapat
+        sem_unlink(SEM_NAME); // Semaphore'u kaldır
     }
     // Semaphore kilitle
 
     munmap(shared_data, sizeof(SharedData)); // Paylaşılan belleği eşleştirmeyi kaldır
     shm_unlink(SHM_NAME);                    // Paylaşılan belleği kaldır
     msgctl(msqid, IPC_RMID, NULL);           // Mesaj kuyruğunu kaldır
-    sem_close(sem);                          // Semaphore'u kapat,
-    sem_unlink(SEM_NAME);                    // Semaphore'u kaldır
 
     printf("[Cleanup] Resources cleaned up successfully.\n");
 }
 
 void sigint_handler(int signum)
 { // SIGINT işleyici
+    (void)signum; // Unused parameter uyarısını bastır
     interrupt_count++;
 
     if (interrupt_count == 1)
@@ -190,6 +192,7 @@ void sigint_handler(int signum)
 
 void *monitor_thread(void *arg)
 { // İzleme iş parçacığı
+    (void)arg; // Unused parameter uyarısını bastır
     int status;
     pid_t result;
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
@@ -198,14 +201,12 @@ void *monitor_thread(void *arg)
         while ((result = waitpid(-1, &status, WNOHANG)) > 0) // Bitmiş child processları beklemeden kontrol et
         {
             sem_wait(sem);
-            int found = 0;
             for (int i = 0; i < shared_data->process_count; i++)
             {
                 if (shared_data->processes[i].pid == result) // Eşleşen process bulundu
                 {
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
-                    found = 1;
                     printf("[Monitor] Process %d has terminated. Updated shared memory.\n", result);
                     break;
                 }
@@ -227,6 +228,7 @@ void *monitor_thread(void *arg)
 
 void *ipc_listener_thread(void *arg)
 { // IPC dinleyici iş parçacığı
+    (void)arg; // Unused parameter uyarısını bastır
     Message msg;
     printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
 
@@ -325,9 +327,13 @@ void start_process(char *command, int mode) // Yeni process başlat
             }
         }
 
+        char command_copy[256];
+        strncpy(command_copy, command, 255);
+        command_copy[255] = '\0';
+
         char *args[10];
         int i = 0;
-        char *token = strtok(command, " ");
+        char *token = strtok(command_copy, " ");
 
         while (token != NULL && i < 9)
         {
@@ -343,6 +349,14 @@ void start_process(char *command, int mode) // Yeni process başlat
     else
     {                  // Parent process
         sem_wait(sem); // Semaphore kilitle
+        if (shared_data->process_count >= 50)
+        {
+            printf("[Main] Maximum process limit reached. Cannot start new process.\n");
+            sem_post(sem);
+            kill(pid, SIGTERM); // Başarısızsa child'ı öldür
+            return;
+        }
+
         int idx = shared_data->process_count;
         shared_data->processes[idx].pid = pid;                      // Process bilgilerini kaydet
         shared_data->processes[idx].owner_pid = getpid();           // Başlatan PID
@@ -416,6 +430,13 @@ void handle_start_process() // Yeni program başlat
 
     printf("Mode (0=ATTACHED, 1=DETACHED): ");
     scanf("%d", &mode);
+    while (getchar() != '\n'); // Tamponu temizle
+
+    if (mode != 0 && mode != 1)
+    {
+        printf("[ERROR] Invalid mode. Use 0 or 1.\n");
+        return;
+    }
 
     start_process(command, mode);
 }
@@ -451,33 +472,52 @@ void handle_list_process() // Çalışan programları listele
 void handle_terminate_process() // Program sonlandır
 {
     pid_t target_pid;
-    printf("Enter PID of program to terminate: "); // Program sonlandır
-    scanf("%d", &target_pid);
+    printf("Enter PID of program to terminate: ");
+    if (scanf("%d", &target_pid) != 1)
+    {
+        printf("[ERROR] Invalid PID format.\n");
+        while (getchar() != '\n');
+        return;
+    }
+    while (getchar() != '\n'); // Tamponu temizle
+
+    // PID'nin yönetilen processler arasında olup olmadığını kontrol et
+    sem_wait(sem);
+    int found = 0;
+    for (int i = 0; i < shared_data->process_count; i++)
+    {
+        if (shared_data->processes[i].pid == target_pid && 
+            shared_data->processes[i].is_active)
+        {
+            found = 1;
+            break;
+        }
+    }
+    sem_post(sem);
+
+    if (!found)
+    {
+        printf("[ERROR] PID %d not found in managed processes.\n", target_pid);
+        return;
+    }
+
+    // PID doğrulandı, şimdi sonlandır
     if (kill(target_pid, SIGTERM) == 0)
     {
         printf("Sent termination signal to PID %d\n", target_pid);
         sem_wait(sem); // Semaphore kilitle
-        int found = 0;
         for (int i = 0; i < shared_data->process_count; i++) // Paylaşılan bellekte ara
         {
-            if (shared_data->processes[i].pid == target_pid)
+            if (shared_data->processes[i].pid == target_pid && 
+                shared_data->processes[i].is_active)
             {
                 shared_data->processes[i].status = TERMINATED; // Durumu güncelle
                 shared_data->processes[i].is_active = 0;       // Aktif değil olarak işaretle
-
-                found = 1;
+                printf("Process %d marked as terminated in shared memory.\n", target_pid);
                 break;
             }
         }
         sem_post(sem); // Semaphore aç
-        if (found)
-        {
-            printf("Process %d marked as terminated in shared memory.\n", target_pid);
-        }
-        else
-        {
-            printf("Process %d not found in shared memory.\n", target_pid);
-        }
     }
     else
     {
@@ -544,12 +584,16 @@ int main() // Ana fonksiyon
             break;
         }
         case 0:
-            running = 0;                          // Döngüyü durdur
-            pthread_cancel(monitor_tid);          // İzleme iş parçacığını iptal et
-            pthread_cancel(ipc_listener_tid);     // IPC dinleyici iş parçacığını iptal
+            printf("[Main] Exiting ProcX...\n");
+            running = 0; // Döngüyü durdur
+
+            Message wake_msg = {.msg_type = 1, .command = 0, .sender_pid = getpid(), .target_pid = 0};
+            msgsnd(msqid, &wake_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // IPC dinleyiciyi uyandır
+
             pthread_join(monitor_tid, NULL);      // İzleme iş parçacığını bekle
             pthread_join(ipc_listener_tid, NULL); // IPC dinleyici iş parçacığını bekle
-            cleanup_resources();                  // Kaynakları temizle
+
+            cleanup_resources(); // Kaynakları temizle
             printf("Exiting ProcX. Goodbye!\n");
             exit(0);
         default:
