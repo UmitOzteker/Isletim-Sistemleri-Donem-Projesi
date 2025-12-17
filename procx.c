@@ -240,7 +240,10 @@ void *ipc_listener_thread(void *arg)
         {
             if (msg.sender_pid == getpid())
             {
-                continue; // Kendi mesajlarımızı yoksay
+                msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0);
+
+                usleep(50000); 
+                continue; 
             }
 
             if (msg.command == CMD_START) // START komutu
@@ -252,10 +255,15 @@ void *ipc_listener_thread(void *arg)
                 printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n",
                        msg.target_pid, msg.sender_pid);
 
+                int kill_result = kill(msg.target_pid, SIGTERM);
+
                 // Fiziksel Öldürme
-                if (kill(msg.target_pid, SIGTERM) == 0)
+                if (kill_result == 0 || errno == ESRCH)
                 {
-                    printf("[IPC Listener] Successfully sent SIGTERM to PID %d\n", msg.target_pid);
+                    if (kill_result == 0)
+                    {
+                        printf("[IPC Listener] Sent SIGTERM to PID %d\n", msg.target_pid);
+                    }
 
                     sem_wait(sem); // Kilitle
 
