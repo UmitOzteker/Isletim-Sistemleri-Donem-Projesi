@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L // POSIX.1-2008 standardını etkinleştir
+#define _DEFAULT_SOURCE         // usleep için gerekli
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -546,6 +547,8 @@ void start_threads(pthread_t *monitor_tid, pthread_t *ipc_listener_tid) // İş 
 {
     pthread_create(monitor_tid, NULL, monitor_thread, NULL);           // İzleme iş parçacığını başlat
     pthread_create(ipc_listener_tid, NULL, ipc_listener_thread, NULL); // IPC dinleyici iş parçacığını başlat
+
+    usleep(100000); // İş parçacıklarının başlaması için kısa bir süre bekle
 }
 
 int main() // Ana fonksiyon
@@ -558,10 +561,12 @@ int main() // Ana fonksiyon
 
     init_resources(); // Kaynakları başlat
 
-    start_threads(&monitor_tid, &ipc_listener_tid);
-
     printf("[Main] Process started (PID: %d). Waiting for signals...\n", getpid());
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
+
+    start_threads(&monitor_tid, &ipc_listener_tid);
+
+    printf("\nWelcome to ProcX - Process Management System\n");
 
     while (1)
     {                   // Ana menü döngüsü
