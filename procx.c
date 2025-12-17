@@ -444,33 +444,34 @@ void handle_start_process() // Yeni program başlat
 
 void handle_list_process() // Çalışan programları listele
 {
-    printf("Listing running programs...\n"); // Çalışan programları listele
-    sem_wait(sem);                           // Semaphore kilitle
+    printf("Listing running programs...\n");
+    sem_wait(sem);
     printf("\n");
-    printf("╔════════════════════════════════════════════════════════════════════════════════╗\n");
-    printf("║                            ÇALIŞAN PROGRAMLAR                                  ║\n");
-    printf("╠═════════╤══════════════════════╤══════════╤════════════╤═════════╤═══════════╣\n");
-    printf("║ PID     │ Command              │ Mode     │ Status     │ Owner   │ Süre      ║\n");
-    printf("╠═════════╪══════════════════════╪══════════╪════════════╪═════════╪═══════════╣\n");
+    printf("╔═══════╦═══════════════════╦══════════╦═══════════╦═════════╦══════════╗\n");
+    printf("║  PID  ║     Command       ║   Mode   ║  Status   ║  Owner  ║   Time   ║\n");
+    printf("╠═══════╬═══════════════════╬══════════╬═══════════╬═════════╬══════════╣\n");
+    
     for (int i = 0; i < shared_data->process_count; i++)
     {
         if (shared_data->processes[i].is_active)
         {
-            time_t now = time(NULL);                                               // Şu anki zaman
-            double duration = difftime(now, shared_data->processes[i].start_time); // Süre hesapla
+            time_t now = time(NULL);
+            double duration = difftime(now, shared_data->processes[i].start_time);
 
-            char *status_str = (shared_data->processes[i].status == RUNNING) ? "Running" : "Terminated";
-            printf("║ %-7d │ %-20.20s │ %-8s │ %-10s │ %-7d │ %-9.0f sn ║\n",
+            char *status_str = (shared_data->processes[i].status == RUNNING) ? "Running" : "Terminate";
+            char *mode_str = (shared_data->processes[i].mode == ATTACHED) ? "Attached" : "Detached";
+            
+            printf("║ %-5d ║ %-17.17s ║ %-8s ║ %-9s ║ %-7d ║ %6.0f s ║\n",
                    shared_data->processes[i].pid,
                    shared_data->processes[i].command,
-                   (shared_data->processes[i].mode == ATTACHED) ? "Attached" : "Detached",
+                   mode_str,
                    status_str,
                    shared_data->processes[i].owner_pid,
                    duration);
         }
     }
-    printf("╚═════════╧══════════════════════╧══════════╧═════════╧═══════════════╝\n");
-    sem_post(sem); // Semaphore aç
+    printf("╚═══════╩═══════════════════╩══════════╩═══════════╩═════════╩══════════╝\n");
+    sem_post(sem);
 }
 
 void handle_terminate_process() // Program sonlandır
