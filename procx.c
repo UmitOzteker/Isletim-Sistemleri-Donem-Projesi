@@ -193,63 +193,68 @@ void sigint_handler(int signum)
 }
 
 void *monitor_thread(void *arg)
-{ // İzleme iş parçacığı
-    (void)arg; // Unused parameter uyarısını bastır
+{
+    (void)arg;
     int status;
     pid_t result;
+    // Başlangıç mesajını temizleme yapmadan basabiliriz, çünkü henüz menü çizilmedi.
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
+    
     while (running)
     {
         sleep(2); // 2 saniye bekle
 
-        for(int i = 0; i < 50; i++){ // Tüm processleri kontrol et
+        for(int i = 0; i <= 50; i++){ 
             sem_wait(sem);
-            if(shared_data->processes[i].is_active == 0){ // Aktif değilse atla
+            if(shared_data->processes[i].is_active == 0){ 
                 sem_post(sem);
                 continue;
-            }else{// Aktifse kontrol et
+            } else {
                 pid_t pid = shared_data->processes[i].pid;
                 pid_t owner_pid = shared_data->processes[i].owner_pid;
                 int is_dead = 0;
-                if (owner_pid == getpid()){ // Kendi başlattığımız processler için waitpid kullan
-                    if (waitpid(pid, &status, WNOHANG) == pid){ // Process bitmiş mi kontrol et
-                        is_dead = 1; // Bitmişse işaretle
-                    }
-                }else { // Başka instance'ların processleri için kill kullan
-                    if (kill(pid, 0) == -1 && errno == ESRCH){ // Process var mı kontrol et
-                        is_dead = 1;
-                    }
+                
+                if (owner_pid == getpid()){ 
+                    if (waitpid(pid, &status, WNOHANG) == pid) is_dead = 1; 
+                } else { 
+                    if (kill(pid, 0) == -1 && errno == ESRCH) is_dead = 1; 
                 }
                 
-                if(is_dead){ // Process bitmişse güncelle
-                    shared_data->processes[i].status = TERMINATED; // Durumu güncelle
+                if(is_dead){ 
+                    shared_data->processes[i].status = TERMINATED; 
                     shared_data->processes[i].is_active = 0;
-                    // Mesajı temiz göster - menü ile çakışmayı önle
-                    printf("\n[Monitor] Process %d terminated.\n", pid);
+                    
+                    // --- DÜZELTME BURADA ---
+                    // Satırı sil -> Mesajı yaz -> Menüyü geri getir
+                    printf("\r\033[K[Monitor] Process %d terminated (Detected).\nSeçiminiz: ", pid);
+                    fflush(stdout); // Çıktıyı hemen ekrana bas (önemli!)
+                    // -----------------------
 
                     Message msg;
                     msg.command = CMD_TERMINATE;
                     msg.msg_type = 1;
                     msg.sender_pid = getpid();
                     msg.target_pid = pid;
-
-                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // Terminate mesajı gönder
+                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
                 }
                 sem_post(sem);
             }
-
         }
-        while ((result = waitpid(-1, &status, WNOHANG)) > 0) // Bitmiş child processları beklemeden kontrol et
+        
+        while ((result = waitpid(-1, &status, WNOHANG)) > 0) 
         {
             sem_wait(sem);
             for (int i = 0; i < shared_data->process_count; i++)
             {
-                if (shared_data->processes[i].pid == result) // Eşleşen process bulundu
+                if (shared_data->processes[i].pid == result) 
                 {
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
-                    // Mesajı temiz göster - menü ile çakışmayı önle
-                    printf("\n[Monitor] Process %d terminated.\n", result);
+                    
+                    // --- DÜZELTME BURADA ---
+                    printf("\r\033[K[Monitor] Process %d has terminated. Updated shared memory.\nSeçiminiz: ", result);
+                    fflush(stdout);
+                    // -----------------------
                     break;
                 }
             }
@@ -260,10 +265,8 @@ void *monitor_thread(void *arg)
             msg.msg_type = 1;
             msg.sender_pid = getpid();
             msg.target_pid = result;
-
-            msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // Terminate mesajı gönder
+            msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); 
         }
-        sleep(2); // 2 saniye bekle
     }
     return NULL;
 }
