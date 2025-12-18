@@ -153,6 +153,20 @@ void init_resources() // Kaynakları başlat
         shared_data->terminal_count = 0; // Sayaçı başlat
     }
     shared_data->terminal_count++;
+
+    int registered = 0;
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        if (shared_data->active_terminals[i] == 0) {
+            shared_data->active_terminals[i] = getpid();
+            registered = 1;
+            break;
+        }
+    }
+    if (!registered) {
+        printf("[Error] Terminal list is full!\n");
+        sem_post(sem);
+        exit(1);
+    }
     printf("[Init] Terminal registered. Total terminals: %d\n", shared_data->terminal_count);
     sem_post(sem); // Semaphore aç
 }
@@ -273,13 +287,7 @@ void *monitor_thread(void *arg)
                 if(found) {
                     printf("\r\033[K[Monitor] Process %d terminated (Detected).\nSeçiminiz: ", pid);
                     fflush(stdout);
-                    
                     // Terminate mesajı gönder
-                    Message msg;
-                    msg.command = CMD_TERMINATE;
-                    msg.msg_type = 1;
-                    msg.sender_pid = getpid();
-                    msg.target_pid = pid;
                     broadcast_message(CMD_TERMINATE, pid);
                 }
             }
@@ -307,12 +315,6 @@ void *monitor_thread(void *arg)
                 printf("\r\033[K[Monitor] Process %d has terminated. Updated shared memory.\nSeçiminiz: ", result);
                 fflush(stdout);
                 
-                // Terminate mesajı gönder
-                Message msg;
-                msg.command = CMD_TERMINATE;
-                msg.msg_type = 1;
-                msg.sender_pid = getpid();
-                msg.target_pid = result;
                 broadcast_message(CMD_TERMINATE, result);
             }
         }
@@ -332,13 +334,14 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
         if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), getpid(), 0) != -1) // Mesaj alındıysa
         {
             if (errno == EINTR || !running) break; // Kapanış sinyali
-            printf("\r\033[K[IPC] Notification for PID %d\nSeçiminiz: ", msg.target_pid);
-            fflush(stdout);
             // Kendi mesajımızı geri yansıtıyorsak (Hot Potato fix)
             if (msg.sender_pid == getpid())
             {
                 continue; 
             }
+
+            printf("\r\033[K[IPC] Notification for PID %d\nSeçiminiz: ", msg.target_pid);
+            fflush(stdout);
             // Mesaj türüne göre işlem yap
             if (msg.command == CMD_START) // START komutu
             {
@@ -468,12 +471,6 @@ void start_process(char *command, int mode) // Yeni process başlat
         printf("[Main] Started process (PID: %d) in %s mode\n",
                pid, mode == ATTACHED ? "ATTACHED" : "DETACHED");
 
-        Message msg;
-        msg.msg_type = 1;
-        msg.command = CMD_START;
-        msg.sender_pid = getpid();
-        msg.target_pid = pid;
-
         broadcast_message(CMD_START, pid); // Başlatma mesajı gönder
 
         if (mode == ATTACHED)
@@ -494,8 +491,6 @@ void start_process(char *command, int mode) // Yeni process başlat
                 }
             }
             sem_post(sem); // Semaphore aç
-
-            msg.command = CMD_TERMINATE;                            // TERMINATE komutu
             broadcast_message(CMD_TERMINATE, pid); // Terminate mesajı gönder
         }
     }
@@ -720,6 +715,12 @@ int main() // Ana fonksiyon
         case 0:
             printf("[Main] Exiting ProcX...\n");
             running = 0; // Döngüyü durdur
+
+            Message wake_msg;
+            wake_msg.msg_type = getpid(); // Alıcı: Benim kendi thread'im
+            wake_msg.command = 0;         // Özel çıkış komutu
+            wake_msg.sender_pid = getpid();
+            msgsnd(msqid, &wake_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
 
             broadcast_message(0, 0); // IPC dinleyiciyi uyandır
 
