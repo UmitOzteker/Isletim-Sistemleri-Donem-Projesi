@@ -327,7 +327,7 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 { 
     (void)arg; 
     Message msg;
-    printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
+    printf("\r\033[IPC Listener] IPC listener thread started (PID: %d)\nSeçiminiz:", getpid());
 
     while (running) // Ana döngü
     {
