@@ -127,6 +127,8 @@ void init_resources() // Kaynakları başlat
         perror("sem_open failed");
         exit(1);
     }
+    sem_wait(sem); // Semaphore kilitle
+    printf("[Init] Resources initialized successfully.\n");
     sem_post(sem); // Semaphore aç
 }
 
