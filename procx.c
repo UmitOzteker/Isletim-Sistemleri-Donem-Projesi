@@ -197,7 +197,6 @@ void *monitor_thread(void *arg)
     (void)arg;
     int status;
     pid_t result;
-    // Başlangıç mesajını temizleme yapmadan basabiliriz, çünkü henüz menü çizilmedi.
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
     
     while (running)
@@ -223,12 +222,9 @@ void *monitor_thread(void *arg)
                 if(is_dead){ 
                     shared_data->processes[i].status = TERMINATED; 
                     shared_data->processes[i].is_active = 0;
-                    
-                    // --- DÜZELTME BURADA ---
-                    // Satırı sil -> Mesajı yaz -> Menüyü geri getir
+
                     printf("\r\033[K[Monitor] Process %d terminated (Detected).\nSeçiminiz: ", pid);
-                    fflush(stdout); // Çıktıyı hemen ekrana bas (önemli!)
-                    // -----------------------
+                    fflush(stdout);
 
                     Message msg;
                     msg.command = CMD_TERMINATE;
@@ -251,10 +247,8 @@ void *monitor_thread(void *arg)
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
                     
-                    // --- DÜZELTME BURADA ---
                     printf("\r\033[K[Monitor] Process %d has terminated. Updated shared memory.\nSeçiminiz: ", result);
                     fflush(stdout);
-                    // -----------------------
                     break;
                 }
             }
@@ -289,17 +283,14 @@ void *ipc_listener_thread(void *arg)
                 continue; 
             }
 
-            // --- BAŞLATMA MESAJI GELDİĞİNDE ---
             if (msg.command == CMD_START) 
             {
-                // \r (başa git) -> \033[K (satırı sil) -> Mesajı yaz -> Prompt'u geri koy
                 printf("\r\033[K[IPC] Process %d started by PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
                 fflush(stdout); // Ekrana hemen bas
             }
-            // --- SONLANDIRMA İSTEĞİ GELDİĞİNDE ---
+
             else if (msg.command == CMD_TERMINATE) 
             {
-                // Bilgilendirme mesajını basarken de satırı temizle
                 printf("\r\033[K[IPC] Terminate request for PID %d from PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
                 fflush(stdout);
 
@@ -307,7 +298,6 @@ void *ipc_listener_thread(void *arg)
 
                 if (kill_result == 0 || errno == ESRCH)
                 {
-                    // "SIGTERM sent" mesajı
                     if (kill_result == 0)
                     {
                         printf("\r\033[K[IPC] SIGTERM sent to PID %d\nSeçiminiz: ", msg.target_pid);
