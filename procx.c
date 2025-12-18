@@ -224,8 +224,8 @@ void *monitor_thread(void *arg)
                 if(is_dead){ // Process bitmişse güncelle
                     shared_data->processes[i].status = TERMINATED; // Durumu güncelle
                     shared_data->processes[i].is_active = 0;
-                    printf("\r\033[K[Monitor] Process %d terminated (Detected).\nSeçiminiz: ", pid); // Güncelleme mesajı
-                    fflush(stdout); // Çıktıyı hemen yazdır
+                    // Mesajı temiz göster - menü ile çakışmayı önle
+                    printf("\n[Monitor] Process %d terminated.\n", pid);
 
                     Message msg;
                     msg.command = CMD_TERMINATE;
@@ -248,7 +248,8 @@ void *monitor_thread(void *arg)
                 {
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
-                    printf("[Monitor] Process %d has terminated. Updated shared memory.\n", result);
+                    // Mesajı temiz göster - menü ile çakışmayı önle
+                    printf("\n[Monitor] Process %d terminated.\n", result);
                     break;
                 }
             }
@@ -288,13 +289,11 @@ void *ipc_listener_thread(void *arg)
 
             if (msg.command == CMD_START) // START komutu
             {
-                printf("\r\033[K[IPC Listener] Received START command from PID %d\nSeçiminiz: ", msg.sender_pid);
-                fflush(stdout);
+                printf("\n[IPC] Process %d started by PID %d\n", msg.target_pid, msg.sender_pid);
             }
             else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
-               printf("\r\033[K[IPC Listener] Received TERMINATE command for PID %d from PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
-               fflush(stdout);
+               printf("\n[IPC] Terminate request for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
 
                 int kill_result = kill(msg.target_pid, SIGTERM);
 
@@ -303,8 +302,7 @@ void *ipc_listener_thread(void *arg)
                 {
                     if (kill_result == 0)
                     {
-                        printf("\r\033[K[IPC Listener] Sent SIGTERM to PID %d\nSeçiminiz: ", msg.target_pid);
-                        fflush(stdout);
+                        printf("[IPC] SIGTERM sent to PID %d\n", msg.target_pid);
                     }
 
                     sem_wait(sem); // Kilitle
