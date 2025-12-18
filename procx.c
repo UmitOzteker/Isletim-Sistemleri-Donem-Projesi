@@ -80,7 +80,7 @@ volatile sig_atomic_t running = 1; // Ana döngü kontrolü
 
 void init_resources() // Kaynakları başlat
 {
-    FILE *fp = fopen("procx_mq_key", "a");
+    FILE *fp = fopen("procx_mq_key", "a"); // ftok için dosya oluştur
     if (fp)
         fclose(fp);
     key = ftok("procx_mq_key", 65); // Mesaj kuyruğu anahtarı oluştur
@@ -122,14 +122,14 @@ void init_resources() // Kaynakları başlat
     }
 
     sem = sem_open(SEM_NAME, O_CREAT, 0644, 1); // Semaphore oluştur
-    if (sem == SEM_FAILED)
+    if (sem == SEM_FAILED) // Hata kontrolü
     {
         perror("sem_open failed");
         exit(1);
     }
 
     sem_wait(sem);
-    if (shared_data->process_count == 0 || shared_data->process_count > 50)
+    if (shared_data->process_count == 0 || shared_data->process_count > 50) // İlk kez başlatılıyorsa
     {
         shared_data->process_count = 0; // İlk kez başlatıyoruz
         printf("[Init] Shared memory initialized.\n");
@@ -158,7 +158,7 @@ void cleanup_resources() // Kaynakları temizle
                 shared_data->processes[i].status = TERMINATED;
             }
         }
-        sem_post(sem);
+        sem_post(sem);        // Semaphore aç
         sem_close(sem);       // Semaphore'u kapat
         sem_unlink(SEM_NAME); // Semaphore'u kaldır
     }
@@ -203,23 +203,23 @@ void *monitor_thread(void *arg)
     {
         sleep(2); // 2 saniye bekle
 
-        for(int i = 0; i <= 50; i++){ 
-            sem_wait(sem);
-            if(shared_data->processes[i].is_active == 0){ 
-                sem_post(sem);
+        for(int i = 0; i <= 50; i++){ // Tüm processleri kontrol et
+            sem_wait(sem); // Semaphore kilitle
+            if(shared_data->processes[i].is_active == 0){  // Aktif değilse atla
+                sem_post(sem); 
                 continue;
             } else {
-                pid_t pid = shared_data->processes[i].pid;
-                pid_t owner_pid = shared_data->processes[i].owner_pid;
+                pid_t pid = shared_data->processes[i].pid; // Process PID
+                pid_t owner_pid = shared_data->processes[i].owner_pid; // Owner PID
                 int is_dead = 0;
                 
-                if (owner_pid == getpid()){ 
-                    if (waitpid(pid, &status, WNOHANG) == pid) is_dead = 1; 
-                } else { 
-                    if (kill(pid, 0) == -1 && errno == ESRCH) is_dead = 1; 
+                if (owner_pid == getpid()){  // Eğer process sahibi bizsek
+                    if (waitpid(pid, &status, WNOHANG) == pid) is_dead = 1; // Process sonlandı mı kontrol et 
+                } else {  // Başka bir instance'ın processiyse
+                    if (kill(pid, 0) == -1 && errno == ESRCH) is_dead = 1; // Process var mı kontrol et
                 }
                 
-                if(is_dead){ 
+                if(is_dead){ // Process sonlandıysa
                     shared_data->processes[i].status = TERMINATED; 
                     shared_data->processes[i].is_active = 0;
 
@@ -231,18 +231,18 @@ void *monitor_thread(void *arg)
                     msg.msg_type = 1;
                     msg.sender_pid = getpid();
                     msg.target_pid = pid;
-                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
+                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // Terminate mesajı gönder
                 }
                 sem_post(sem);
             }
         }
         
-        while ((result = waitpid(-1, &status, WNOHANG)) > 0) 
+        while ((result = waitpid(-1, &status, WNOHANG)) > 0) // Tüm çocuk processleri kontrol et
         {
-            sem_wait(sem);
-            for (int i = 0; i < shared_data->process_count; i++)
+            sem_wait(sem); // Semaphore kilitle
+            for (int i = 0; i < shared_data->process_count; i++) // Tüm processleri tara
             {
-                if (shared_data->processes[i].pid == result) 
+                if (shared_data->processes[i].pid == result) // Eşleşen process bulundu
                 {
                     shared_data->processes[i].status = TERMINATED;
                     shared_data->processes[i].is_active = 0;
@@ -252,7 +252,7 @@ void *monitor_thread(void *arg)
                     break;
                 }
             }
-            sem_post(sem);
+            sem_post(sem); // Semaphore aç
 
             Message msg;
             msg.command = CMD_TERMINATE;
@@ -265,15 +265,15 @@ void *monitor_thread(void *arg)
     return NULL;
 }
 
-void *ipc_listener_thread(void *arg)
+void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 { 
     (void)arg; 
     Message msg;
     printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
 
-    while (running)
+    while (running) // Ana döngü
     {
-        if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1)
+        if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1) // Mesaj alındıysa
         {
             // Kendi mesajımızı geri yansıtıyorsak (Hot Potato fix)
             if (msg.sender_pid == getpid())
@@ -282,23 +282,23 @@ void *ipc_listener_thread(void *arg)
                 usleep(50000); 
                 continue; 
             }
-
-            if (msg.command == CMD_START) 
+            // Mesaj türüne göre işlem yap
+            if (msg.command == CMD_START) // START komutu
             {
                 printf("\r\033[K[IPC] Process %d started by PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
                 fflush(stdout); // Ekrana hemen bas
             }
-
-            else if (msg.command == CMD_TERMINATE) 
+            // Mesaj türüne göre işlem yap
+            else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
                 printf("\r\033[K[IPC] Terminate request for PID %d from PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
                 fflush(stdout);
 
-                int kill_result = kill(msg.target_pid, SIGTERM);
+                int kill_result = kill(msg.target_pid, SIGTERM); // SIGTERM gönder
 
-                if (kill_result == 0 || errno == ESRCH)
+                if (kill_result == 0 || errno == ESRCH) // Başarılıysa veya process zaten yoksa
                 {
-                    if (kill_result == 0)
+                    if (kill_result == 0) // SIGTERM başarılıysa
                     {
                         printf("\r\033[K[IPC] SIGTERM sent to PID %d\nSeçiminiz: ", msg.target_pid);
                         fflush(stdout);
@@ -306,9 +306,9 @@ void *ipc_listener_thread(void *arg)
 
                     sem_wait(sem); 
                     int found = 0;
-                    for (int i = 0; i < shared_data->process_count; i++) 
+                    for (int i = 0; i < shared_data->process_count; i++)  // Process listesinde ara
                     {
-                        if (shared_data->processes[i].pid == msg.target_pid) 
+                        if (shared_data->processes[i].pid == msg.target_pid) // Eşleşen process bulundu
                         {
                             shared_data->processes[i].status = TERMINATED; 
                             shared_data->processes[i].is_active = 0; 
@@ -342,7 +342,7 @@ void *ipc_listener_thread(void *arg)
         }
         else
         {
-            if (errno == EIDRM || errno == EINVAL) {
+            if (errno == EIDRM || errno == EINVAL) { // Kuyruk kaldırıldıysa
                  printf("\r\033[K[IPC Listener] Queue removed. Exiting.\n");
                  break;
             }
