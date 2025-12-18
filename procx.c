@@ -272,90 +272,92 @@ void *monitor_thread(void *arg)
 }
 
 void *ipc_listener_thread(void *arg)
-{ // IPC dinleyici iş parçacığı
-    (void)arg; // Unused parameter uyarısını bastır
+{ 
+    (void)arg; 
     Message msg;
     printf("[IPC Listener] IPC listener thread started (PID: %d)\n", getpid());
 
     while (running)
     {
-        // Mesaj gelene kadar burada bekler, işlemci harcamaz.
         if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1)
         {
+            // Kendi mesajımızı geri yansıtıyorsak (Hot Potato fix)
             if (msg.sender_pid == getpid())
             {
                 msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0);
-
                 usleep(50000); 
                 continue; 
             }
 
-            if (msg.command == CMD_START) // START komutu
+            // --- BAŞLATMA MESAJI GELDİĞİNDE ---
+            if (msg.command == CMD_START) 
             {
-                printf("\n[IPC] Process %d started by PID %d\n", msg.target_pid, msg.sender_pid);
+                // \r (başa git) -> \033[K (satırı sil) -> Mesajı yaz -> Prompt'u geri koy
+                printf("\r\033[K[IPC] Process %d started by PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
+                fflush(stdout); // Ekrana hemen bas
             }
-            else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
+            // --- SONLANDIRMA İSTEĞİ GELDİĞİNDE ---
+            else if (msg.command == CMD_TERMINATE) 
             {
-               printf("\n[IPC] Terminate request for PID %d from PID %d\n", msg.target_pid, msg.sender_pid);
+                // Bilgilendirme mesajını basarken de satırı temizle
+                printf("\r\033[K[IPC] Terminate request for PID %d from PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
+                fflush(stdout);
 
                 int kill_result = kill(msg.target_pid, SIGTERM);
 
-                // Fiziksel Öldürme
                 if (kill_result == 0 || errno == ESRCH)
                 {
+                    // "SIGTERM sent" mesajı
                     if (kill_result == 0)
                     {
-                        printf("[IPC] SIGTERM sent to PID %d\n", msg.target_pid);
+                        printf("\r\033[K[IPC] SIGTERM sent to PID %d\nSeçiminiz: ", msg.target_pid);
+                        fflush(stdout);
                     }
 
-                    sem_wait(sem); // Kilitle
-
+                    sem_wait(sem); 
                     int found = 0;
-                    for (int i = 0; i < shared_data->process_count; i++) // Paylaşılan bellekte ara
+                    for (int i = 0; i < shared_data->process_count; i++) 
                     {
-                        if (shared_data->processes[i].pid == msg.target_pid) // Eşleşen process bulundu
+                        if (shared_data->processes[i].pid == msg.target_pid) 
                         {
-                            shared_data->processes[i].status = TERMINATED; // Durumu güncelle
-                            shared_data->processes[i].is_active = 0; // Aktiflik durumunu güncelle
+                            shared_data->processes[i].status = TERMINATED; 
+                            shared_data->processes[i].is_active = 0; 
                             found = 1;
                             break;
                         }
                     }
+                    sem_post(sem); 
 
-                    sem_post(sem); // Kilidi aç
-
-                    if (found)
-                        printf("[IPC Listener] Process %d terminated and updated via IPC.\n", msg.target_pid);
-                    else
-                        printf("[IPC Listener] Process %d not found in shared memory.\n", msg.target_pid);
+                    // "Terminated via IPC" mesajı
+                    if (found) {
+                        printf("\r\033[K[IPC Listener] Process %d terminated via IPC.\nSeçiminiz: ", msg.target_pid);
+                        fflush(stdout);
+                    }
                 }
                 else
                 {
+                    // Hata mesajı
+                    printf("\r\033[K");
                     perror("[IPC Listener] Failed to send termination signal");
+                    printf("Seçiminiz: ");
+                    fflush(stdout);
                 }
             }
             else
             {
-                printf("\n[IPC Listener] Unknown command received: %d\n", msg.command);
+                // Bilinmeyen komut mesajı
+                printf("\r\033[K[IPC Listener] Unknown command received: %d\nSeçiminiz: ", msg.command);
+                fflush(stdout);
             }
         }
         else
         {
-            // Mesaj kuyruğu silinmişse veya ciddi hata varsa döngüden çık
-            if (errno == EIDRM || errno == EINVAL)
-            {
-                printf("[IPC Listener] Message queue removed or invalid. Exiting thread.\n");
-                break;
-            }
-            else if (errno != EINTR && errno != ENOMSG)
-            {
-                perror("[IPC Listener] msgrcv failed");
-                break;
+            if (errno == EIDRM || errno == EINVAL) {
+                 printf("\r\033[K[IPC Listener] Queue removed. Exiting.\n");
+                 break;
             }
         }
     }
-
-    printf("[IPC Listener] Thread terminating.\n");
     return NULL;
 }
 
