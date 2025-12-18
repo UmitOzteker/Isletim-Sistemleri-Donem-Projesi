@@ -58,6 +58,7 @@ typedef struct
 typedef struct
 {
     ProcessInfo processes[MAX_PROCESSES]; // Maksimum 50 process
+    int terminal_count; // Aktif terminal sayısını tutacak sayaç
 } SharedData;
 // Mesaj yapısı
 typedef struct
@@ -128,7 +129,11 @@ void init_resources() // Kaynakları başlat
         exit(1);
     }
     sem_wait(sem); // Semaphore kilitle
-    printf("[Init] Resources initialized successfully.\n");
+    if (shared_data->terminal_count < 0 || shared_data->terminal_count > 100 ) {
+        shared_data->terminal_count = 0; // Sayaçı başlat
+    }
+    shared_data->terminal_count++;
+    printf("[Init] Terminal registered. Total terminals: %d\n", shared_data->terminal_count);
     sem_post(sem); // Semaphore aç
 }
 
@@ -137,6 +142,9 @@ void cleanup_resources() // Kaynakları temizle
     if (sem != NULL && sem != SEM_FAILED)
     {
         sem_wait(sem);
+        shared_data->terminal_count--;
+        int current_count = shared_data->terminal_count;
+        // Terminal sayacını azalt
         for (int i = 0; i < MAX_PROCESSES; i++)
         {
             if (shared_data->processes[i].is_active &&
@@ -149,17 +157,22 @@ void cleanup_resources() // Kaynakları temizle
                 shared_data->processes[i].status = TERMINATED;
             }
         }
-        sem_post(sem);        // Semaphore aç
-        sem_close(sem);       // Semaphore'u kapat
-        sem_unlink(SEM_NAME); // Semaphore'u kaldır
+        printf("[Cleanup] Terminated all attached processes started by this terminal.\n");
+
+        if(current_count <= 0) {
+            sem_post(sem);        // Semaphore aç
+            sem_close(sem);       // Semaphore'u kapat
+            sem_unlink(SEM_NAME); // Semaphore'u kaldır
+            shm_unlink(SHM_NAME); // Paylaşılan belleği kaldır
+            msgctl(msqid, IPC_RMID, NULL); // Mesaj kuyruğunu kaldır
+            printf("[Cleanup] Last terminal exited. Resources fully cleaned up.\n");
+        }else{
+            sem_post(sem); // Semaphore aç
+            sem_close(sem); // Semaphore'u kapat
+            printf("[Cleanup] Terminal exited. Remaining terminals: %d\n", current_count);
+        }
     }
-    // Semaphore kilitle
-
     munmap(shared_data, sizeof(SharedData)); // Paylaşılan belleği eşleştirmeyi kaldır
-    shm_unlink(SHM_NAME);                    // Paylaşılan belleği kaldır
-    msgctl(msqid, IPC_RMID, NULL);           // Mesaj kuyruğunu kaldır
-
-    printf("[Cleanup] Resources cleaned up successfully.\n");
 }
 
 void sigint_handler(int signum)
@@ -303,7 +316,6 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
             // Kendi mesajımızı geri yansıtıyorsak (Hot Potato fix)
             if (msg.sender_pid == getpid())
             {
-                usleep(50000); 
                 continue; 
             }
             // Mesaj türüne göre işlem yap
@@ -638,8 +650,6 @@ void start_threads(pthread_t *monitor_tid, pthread_t *ipc_listener_tid) // İş 
 {
     pthread_create(monitor_tid, NULL, monitor_thread, NULL);           // İzleme iş parçacığını başlat
     pthread_create(ipc_listener_tid, NULL, ipc_listener_thread, NULL); // IPC dinleyici iş parçacığını başlat
-
-    usleep(100000); // İş parçacıklarının başlaması için kısa bir süre bekle
 }
 
 int main() // Ana fonksiyon
