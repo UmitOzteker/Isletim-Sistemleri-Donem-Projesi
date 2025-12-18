@@ -15,6 +15,7 @@
 #include <signal.h>    // kill, SIGTERM
 #include <pthread.h>   // pthread_create, pthread_join
 #include <sys/wait.h>  // waitpid
+#include <ctype.h>     // isspace fonksiyonu için gerekli
 
 // --- ENUM VE SABITLER ---
 
@@ -77,7 +78,7 @@ int msqid;                         // Message Queue ID
 key_t key;                         // Message Queue anahtarı
 volatile sig_atomic_t running = 1; // Ana döngü kontrolü
 
-void init_resources()
+void init_resources() // Kaynakları başlat
 {
     FILE *fp = fopen("procx_mq_key", "a");
     if (fp)
@@ -248,12 +249,13 @@ void *ipc_listener_thread(void *arg)
 
             if (msg.command == CMD_START) // START komutu
             {
-                printf("\n[IPC Listener] Received START command from PID %d\n", msg.sender_pid);
+                printf("\r\033[K[IPC Listener] Received START command from PID %d\nSeçiminiz: ", msg.sender_pid);
+                fflush(stdout);
             }
             else if (msg.command == CMD_TERMINATE) // TERMINATE komutu
             {
-                printf("\n[IPC Listener] Received TERMINATE command for PID %d from PID %d\n",
-                       msg.target_pid, msg.sender_pid);
+               printf("\r\033[K[IPC Listener] Received TERMINATE command for PID %d from PID %d\nSeçiminiz: ", msg.target_pid, msg.sender_pid);
+               fflush(stdout);
 
                 int kill_result = kill(msg.target_pid, SIGTERM);
 
@@ -262,7 +264,8 @@ void *ipc_listener_thread(void *arg)
                 {
                     if (kill_result == 0)
                     {
-                        printf("[IPC Listener] Sent SIGTERM to PID %d\n", msg.target_pid);
+                        printf("\r\033[K[IPC Listener] Sent SIGTERM to PID %d\nSeçiminiz: ", msg.target_pid);
+                        fflush(stdout);
                     }
 
                     sem_wait(sem); // Kilitle
@@ -413,6 +416,24 @@ void start_process(char *command, int mode) // Yeni process başlat
     }
 }
 
+void trim(char *str) { // Baş ve sondaki boşlukları silen yardımcı fonksiyon
+    if (str == NULL) return;
+
+    int len = strlen(str);
+    while (len > 0 && isspace((unsigned char)str[len - 1])) { // Sondaki boşlukları atla
+        str[--len] = '\0';
+    }
+
+    char *start = str;
+    while (*start && isspace((unsigned char)*start)) { // Baştaki boşlukları atla
+        start++;
+    }
+
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1); // +1 null karakteri de taşımak için
+    }
+}
+
 void display_menu() // Menü göster
 {
     printf("\n╔════════════════════════════════════╗\n");
@@ -435,6 +456,9 @@ void handle_start_process() // Yeni program başlat
 
     printf("Enter command to execute: ");
     fgets(command, sizeof(command), stdin);
+    
+    trim(command); // Baş ve sondaki boşlukları kaldır
+
     command[strcspn(command, "\n")] = 0; // Newline kaldır
 
     printf("Mode (0=ATTACHED, 1=DETACHED): ");
@@ -478,8 +502,8 @@ void handle_list_process() // Çalışan programları listele
                    duration);
         }
     }
-    printf("╚═══════╩═══════════════════╩══════════╩═══════════╩═════════╩══════════╝\n");
     sem_post(sem);
+    printf("╚═══════╩═══════════════════╩══════════╩═══════════╩═════════╩══════════╝\n");
 }
 
 void handle_terminate_process() // Program sonlandır
