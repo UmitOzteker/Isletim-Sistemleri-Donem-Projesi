@@ -200,6 +200,45 @@ void *monitor_thread(void *arg)
     printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
     while (running)
     {
+        sleep(2); // 2 saniye bekle
+
+        for(int i = 0; i <= 50; i++){ // Tüm processleri kontrol et
+            sem_wait(sem);
+            if(shared_data->processes[i].is_active == 0){ // Aktif değilse atla
+                sem_post(sem);
+                continue;
+            }else{// Aktifse kontrol et
+                pid_t pid = shared_data->processes[i].pid;
+                pid_t owner_pid = shared_data->processes[i].owner_pid;
+                int is_dead = 0;
+                if (owner_pid == getpid()){ // Kendi başlattığımız processler için waitpid kullan
+                    if (waitpid(pid, &status, WNOHANG) == pid){ // Process bitmiş mi kontrol et
+                        is_dead = 1; // Bitmişse işaretle
+                    }
+                }else { // Başka instance'ların processleri için kill kullan
+                    if (kill(pid, 0) == -1 && errno == ESRCH){ // Process var mı kontrol et
+                        is_dead = 1;
+                    }
+                }
+                
+                if(is_dead){ // Process bitmişse güncelle
+                    shared_data->processes[i].status = TERMINATED; // Durumu güncelle
+                    shared_data->processes[i].is_active = 0;
+                    printf("\r\033[K[Monitor] Process %d terminated (Detected).\nSeçiminiz: ", pid); // Güncelleme mesajı
+                    fflush(stdout); // Çıktıyı hemen yazdır
+
+                    Message msg;
+                    msg.command = CMD_TERMINATE;
+                    msg.msg_type = 1;
+                    msg.sender_pid = getpid();
+                    msg.target_pid = pid;
+
+                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // Terminate mesajı gönder
+                }
+                sem_post(sem);
+            }
+
+        }
         while ((result = waitpid(-1, &status, WNOHANG)) > 0) // Bitmiş child processları beklemeden kontrol et
         {
             sem_wait(sem);
