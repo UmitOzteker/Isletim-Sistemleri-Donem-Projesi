@@ -25,6 +25,7 @@
 #define MQ_KEY_FILE "procx_mq_key" // Message Queue ftok dosyası (Lab 8 mantığı) [cite: 1116]
 #define PROJ_ID 65                 // ftok proje ID
 #define MAX_PROCESSES 50           // Maksimum process sayısı
+#define MAX_TERMINALS 100         // Maksimum terminal sayısı
 
 // ProcessMode Tanımı (Attached/Detached)
 typedef enum
@@ -59,6 +60,7 @@ typedef struct
 {
     ProcessInfo processes[MAX_PROCESSES]; // Maksimum 50 process
     int terminal_count; // Aktif terminal sayısını tutacak sayaç
+    pid_t active_terminals[MAX_TERMINALS]; // Aktif terminal PID'leri
 } SharedData;
 // Mesaj yapısı
 typedef struct
@@ -78,6 +80,24 @@ sem_t *sem;                        // Semaphore işaretçisi
 int msqid;                         // Message Queue ID
 key_t key;                         // Message Queue anahtarı
 volatile sig_atomic_t running = 1; // Ana döngü kontrolü
+
+void broadcast_message(int command, pid_t target_pid) {
+    Message msg;
+    msg.command = command;
+    msg.sender_pid = getpid();
+    msg.target_pid = target_pid;
+
+    sem_wait(sem);
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        pid_t dest = shared_data->active_terminals[i];
+        // Sadece diğer aktif terminallere gönder
+        if (dest != 0 && dest != getpid()) {
+            msg.msg_type = dest; // Hedef PID
+            msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0);
+        }
+    }
+    sem_post(sem);
+}
 
 void init_resources() // Kaynakları başlat
 {
@@ -144,6 +164,16 @@ void cleanup_resources() // Kaynakları temizle
         sem_wait(sem);
         shared_data->terminal_count--;
         int current_count = shared_data->terminal_count;
+
+        for (int i = 0; i < MAX_TERMINALS; i++) {
+        if (shared_data->active_terminals[i] == getpid()) {
+            shared_data->active_terminals[i] = 0;
+            break;
+        }
+    }
+
+        int is_last = (shared_data->terminal_count <= 0);
+
         // Terminal sayacını azalt
         for (int i = 0; i < MAX_PROCESSES; i++)
         {
@@ -159,16 +189,14 @@ void cleanup_resources() // Kaynakları temizle
         }
         printf("[Cleanup] Terminated all attached processes started by this terminal.\n");
 
-        if(current_count <= 0) {
-            sem_post(sem);        // Semaphore aç
-            sem_close(sem);       // Semaphore'u kapat
-            sem_unlink(SEM_NAME); // Semaphore'u kaldır
-            shm_unlink(SHM_NAME); // Paylaşılan belleği kaldır
-            msgctl(msqid, IPC_RMID, NULL); // Mesaj kuyruğunu kaldır
-            printf("[Cleanup] Last terminal exited. Resources fully cleaned up.\n");
+        if(is_last) {
+        shm_unlink(SHM_NAME); // Paylaşılan belleği kaldır
+        msgctl(msqid, IPC_RMID, NULL); // Mesaj kuyruğunu kaldır
+        sem_post(sem);        // Semaphore aç
+        sem_unlink(SEM_NAME); // Semaphore'u kaldır
+        printf("[Cleanup] Last terminal exited. Resources fully cleaned up.\n");
         }else{
             sem_post(sem); // Semaphore aç
-            sem_close(sem); // Semaphore'u kapat
             printf("[Cleanup] Terminal exited. Remaining terminals: %d\n", current_count);
         }
     }
@@ -180,19 +208,9 @@ void sigint_handler(int signum)
     (void)signum; // Unused parameter uyarısını bastır
     interrupt_count++;
 
-    if (interrupt_count == 1)
-    {
-        printf("\n[Handler] Caught SIGINT (1/3). Press Ctrl+C 2 more times to exit.\n");
-    }
-    else if (interrupt_count == 2)
-    {
-        printf("\n[Handler] Caught SIGINT (2/3). Press Ctrl+C 1 more time to exit.\n");
-    }
-    else
-    {
-        printf("\n[Handler] Caught SIGINT (3/3). Exiting now.\n");
-        cleanup_resources(); // Kaynakları temizle
-        exit(0);
+    if(interrupt_count >= 3) {
+        running = 0; // Ana döngüyü durdur
+        printf("\n[Signal Handler] Received 3 SIGINTs. Exiting ProcX...\n");
     }
 }
 
@@ -262,7 +280,7 @@ void *monitor_thread(void *arg)
                     msg.msg_type = 1;
                     msg.sender_pid = getpid();
                     msg.target_pid = pid;
-                    msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
+                    broadcast_message(CMD_TERMINATE, pid);
                 }
             }
         }
@@ -295,7 +313,7 @@ void *monitor_thread(void *arg)
                 msg.msg_type = 1;
                 msg.sender_pid = getpid();
                 msg.target_pid = result;
-                msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
+                broadcast_message(CMD_TERMINATE, result);
             }
         }
     }
@@ -311,8 +329,11 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 
     while (running) // Ana döngü
     {
-        if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), 0, 0) != -1) // Mesaj alındıysa
+        if (msgrcv(msqid, &msg, sizeof(Message) - sizeof(long), getpid(), 0) != -1) // Mesaj alındıysa
         {
+            if (errno == EINTR || !running) break; // Kapanış sinyali
+            printf("\r\033[K[IPC] Notification for PID %d\nSeçiminiz: ", msg.target_pid);
+            fflush(stdout);
             // Kendi mesajımızı geri yansıtıyorsak (Hot Potato fix)
             if (msg.sender_pid == getpid())
             {
@@ -453,7 +474,7 @@ void start_process(char *command, int mode) // Yeni process başlat
         msg.sender_pid = getpid();
         msg.target_pid = pid;
 
-        msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Başlatma mesajı gönder
+        broadcast_message(CMD_START, pid); // Başlatma mesajı gönder
 
         if (mode == ATTACHED)
         {
@@ -475,7 +496,7 @@ void start_process(char *command, int mode) // Yeni process başlat
             sem_post(sem); // Semaphore aç
 
             msg.command = CMD_TERMINATE;                            // TERMINATE komutu
-            msgsnd(msqid, &msg, sizeof(Message) - sizeof(long), 0); // Terminate mesajı gönder
+            broadcast_message(CMD_TERMINATE, pid); // Terminate mesajı gönder
         }
     }
 }
@@ -669,7 +690,7 @@ int main() // Ana fonksiyon
 
     printf("\nWelcome to ProcX - Process Management System\n");
 
-    while (1)
+    while (running)
     {                   // Ana menü döngüsü
         display_menu(); // Menü göster
 
@@ -700,8 +721,7 @@ int main() // Ana fonksiyon
             printf("[Main] Exiting ProcX...\n");
             running = 0; // Döngüyü durdur
 
-            Message wake_msg = {.msg_type = 1, .command = 0, .sender_pid = getpid(), .target_pid = 0};
-            msgsnd(msqid, &wake_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); // IPC dinleyiciyi uyandır
+            broadcast_message(0, 0); // IPC dinleyiciyi uyandır
 
             pthread_join(monitor_tid, NULL);      // İzleme iş parçacığını bekle
             pthread_join(ipc_listener_tid, NULL); // IPC dinleyici iş parçacığını bekle
