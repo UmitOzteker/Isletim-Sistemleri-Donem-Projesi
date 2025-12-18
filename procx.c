@@ -202,7 +202,7 @@ void *monitor_thread(void *arg)
     {
         sleep(2); // 2 saniye bekle
 
-        for(int i = 0; i <= 50; i++){ // Tüm processleri kontrol et
+        for(int i = 0; i < 50; i++){ // Tüm processleri kontrol et
             sem_wait(sem);
             if(shared_data->processes[i].is_active == 0){ // Aktif değilse atla
                 sem_post(sem);
