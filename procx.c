@@ -1,8 +1,8 @@
 #define _POSIX_C_SOURCE 200809L // POSIX.1-2008 standardını etkinleştir
 #define _DEFAULT_SOURCE         // usleep için gerekli
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <stdio.h>     // printf, perror
+#include <stdlib.h>    // exit, atoi
+#include <string.h>    // memset, strncpy, strtok
 #include <unistd.h>    // fork, execvp, sleep
 #include <fcntl.h>     // O_CREAT, O_EXCL, O_RDWR
 #include <sys/mman.h>  // shm_open, mmap, shm_unlink, munmap
@@ -310,12 +310,12 @@ void *ipc_listener_thread(void *arg)
                     sem_wait(sem); // Kilitle
 
                     int found = 0;
-                    for (int i = 0; i < shared_data->process_count; i++)
+                    for (int i = 0; i < shared_data->process_count; i++) // Paylaşılan bellekte ara
                     {
-                        if (shared_data->processes[i].pid == msg.target_pid)
+                        if (shared_data->processes[i].pid == msg.target_pid) // Eşleşen process bulundu
                         {
-                            shared_data->processes[i].status = TERMINATED;
-                            shared_data->processes[i].is_active = 0;
+                            shared_data->processes[i].status = TERMINATED; // Durumu güncelle
+                            shared_data->processes[i].is_active = 0; // Aktiflik durumunu güncelle
                             found = 1;
                             break;
                         }
@@ -378,15 +378,15 @@ void start_process(char *command, int mode) // Yeni process başlat
             }
         }
 
-        char command_copy[256];
-        strncpy(command_copy, command, 255);
-        command_copy[255] = '\0';
+        char command_copy[256]; // Komutun kopyası
+        strncpy(command_copy, command, 255); // Komutun bir kopyasını al
+        command_copy[255] = '\0'; // Null terminator ekle
 
-        char *args[10];
-        int i = 0;
-        char *token = strtok(command_copy, " ");
+        char *args[10]; // Argüman dizisi
+        int i = 0; // Argüman sayacı
+        char *token = strtok(command_copy, " "); // Komutu boşluklara göre parçala
 
-        while (token != NULL && i < 9)
+        while (token != NULL && i < 9) // Maksimum 9 argüman
         {
             args[i++] = token;
             token = strtok(NULL, " ");
@@ -636,7 +636,7 @@ int main() // Ana fonksiyon
     printf("[Main] Process started (PID: %d). Waiting for signals...\n", getpid());
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
 
-    start_threads(&monitor_tid, &ipc_listener_tid);
+    start_threads(&monitor_tid, &ipc_listener_tid); // İş parçacıklarını başlat
 
     printf("\nWelcome to ProcX - Process Management System\n");
 
