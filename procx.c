@@ -534,10 +534,10 @@ void handle_list_process() // Çalışan programları listele
     printf("Listing running programs...\n");
     sem_wait(sem);
     printf("\n");
-    printf("╔═══════╦═══════════════════╦══════════╦═══════════╦═════════╦══════════╗\n");
-    printf("║  PID  ║     Command       ║   Mode   ║  Status   ║  Owner  ║   Time   ║\n");
-    printf("╠═══════╬═══════════════════╬══════════╬═══════════╬═════════╬══════════╣\n");
-    
+    printf("╔═════╦═══════╦═══════════════════╦══════════╦═══════════╦═════════╦══════════╗\n");
+    printf("║  #  ║  PID  ║     Command       ║   Mode   ║  Status   ║  Owner  ║   Time   ║\n");
+    printf("╠═════╬═══════╬═══════════════════╬══════════╬═══════════╬═════════╬══════════╣\n");
+
     for (int i = 0; i < MAX_PROCESSES; i++)
     {
         if (shared_data->processes[i].is_active)
@@ -548,7 +548,8 @@ void handle_list_process() // Çalışan programları listele
             char *status_str = (shared_data->processes[i].status == RUNNING) ? "Running" : "Terminate";
             char *mode_str = (shared_data->processes[i].mode == ATTACHED) ? "Attached" : "Detached";
             
-            printf("║ %-5d ║ %-17.17s ║ %-8s ║ %-9s ║ %-7d ║ %6.0f s ║\n",
+            printf("║ %-3d ║ %-5d ║ %-17.17s ║ %-8s ║ %-9s ║ %-7d ║ %6.0f s ║\n",
+                   i,
                    shared_data->processes[i].pid,
                    shared_data->processes[i].command,
                    mode_str,
@@ -558,7 +559,7 @@ void handle_list_process() // Çalışan programları listele
         }
     }
     sem_post(sem);
-    printf("╚═══════╩═══════════════════╩══════════╩═══════════╩═════════╩══════════╝\n");
+    printf("╚═════╩═══════╩═══════════════════╩══════════╩═══════════╩═════════╩══════════╝\n");
 }
 
 void handle_terminate_process() // Program sonlandır
