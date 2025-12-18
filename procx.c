@@ -24,6 +24,7 @@
 #define SEM_NAME "/procx_sem"      // Semaphore Adı [cite: 1925]
 #define MQ_KEY_FILE "procx_mq_key" // Message Queue ftok dosyası (Lab 8 mantığı) [cite: 1116]
 #define PROJ_ID 65                 // ftok proje ID
+#define MAX_PROCESSES 50           // Maksimum process sayısı
 
 // ProcessMode Tanımı (Attached/Detached)
 typedef enum
@@ -56,8 +57,7 @@ typedef struct
 // Paylaşılan bellek yapısı
 typedef struct
 {
-    ProcessInfo processes[50]; // Maksimum 50 process
-    int process_count;         // Aktif process sayısı
+    ProcessInfo processes[MAX_PROCESSES]; // Maksimum 50 process
 } SharedData;
 // Mesaj yapısı
 typedef struct
@@ -127,18 +127,7 @@ void init_resources() // Kaynakları başlat
         perror("sem_open failed");
         exit(1);
     }
-
-    sem_wait(sem);
-    if (shared_data->process_count == 0 || shared_data->process_count > 50) // İlk kez başlatılıyorsa
-    {
-        shared_data->process_count = 0; // İlk kez başlatıyoruz
-        printf("[Init] Shared memory initialized.\n");
-    }
-    else
-    {
-        printf("[Init] Shared memory already exists with %d processes.\n", shared_data->process_count);
-    }
-    sem_post(sem);
+    sem_post(sem); // Semaphore aç
 }
 
 void cleanup_resources() // Kaynakları temizle
@@ -146,7 +135,7 @@ void cleanup_resources() // Kaynakları temizle
     if (sem != NULL && sem != SEM_FAILED)
     {
         sem_wait(sem);
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < MAX_PROCESSES; i++)
         {
             if (shared_data->processes[i].is_active &&
                 shared_data->processes[i].mode == ATTACHED &&
@@ -203,7 +192,7 @@ void *monitor_thread(void *arg)
         sleep(2); // 2 saniye bekle
         
         // Dizideki tüm processleri kontrol et
-        for(int i = 0; i < 50; i++) { 
+        for(int i = 0; i < MAX_PROCESSES; i++) { 
             sem_wait(sem);
             
             // Sınır kontrolü ve aktiflik kontrolü
@@ -236,7 +225,7 @@ void *monitor_thread(void *arg)
                 
                 // Process'i bul ve güncelle (PID ile ara çünkü index değişmiş olabilir)
                 int found = 0;
-                for(int j = 0; j < 50; j++) {
+                for(int j = 0; j < MAX_PROCESSES; j++) {
                     if(shared_data->processes[j].pid == pid && 
                        shared_data->processes[j].is_active) {
                         shared_data->processes[j].status = TERMINATED;
@@ -269,7 +258,7 @@ void *monitor_thread(void *arg)
             sem_wait(sem);
             
             int found = 0;
-            for (int i = 0; i < 50; i++) {
+            for (int i = 0; i < MAX_PROCESSES; i++) {
                 if (shared_data->processes[i].pid == result && 
                     shared_data->processes[i].is_active) {
                     shared_data->processes[i].status = TERMINATED;
@@ -339,7 +328,7 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 
                     sem_wait(sem); 
                     int found = 0;
-                    for (int i = 0; i < 50; i++)  // Process listesinde ara
+                    for (int i = 0; i < MAX_PROCESSES; i++)  // Process listesinde ara
                     {
                         if (shared_data->processes[i].pid == msg.target_pid) // Eşleşen process bulundu
                         {
@@ -418,7 +407,7 @@ void start_process(char *command, int mode) // Yeni process başlat
     {                  // Parent process
         sem_wait(sem); // Semaphore kilitle
         int idx = -1;
-        for (int i = 0; i < 50; i++) {
+        for (int i = 0; i < MAX_PROCESSES; i++) {
             if (!shared_data->processes[i].is_active) {
                 idx = i;
                 break;
@@ -440,7 +429,6 @@ void start_process(char *command, int mode) // Yeni process başlat
         shared_data->processes[idx].start_time = time(NULL);        // Başlangıç zamanı
         shared_data->processes[idx].is_active = 1;                  // Aktif
 
-        shared_data->process_count++;
         sem_post(sem); // Semaphore aç
         printf("[Main] Started process (PID: %d) in %s mode\n",
                pid, mode == ATTACHED ? "ATTACHED" : "DETACHED");
@@ -461,7 +449,7 @@ void start_process(char *command, int mode) // Yeni process başlat
             printf("[Main] Attached process (PID: %d) has terminated.\n", pid);
 
             sem_wait(sem); // Semaphore kilitle
-            for (int i = 0; i < 50; i++)
+            for (int i = 0; i < MAX_PROCESSES; i++)
             {
                 if (shared_data->processes[i].pid == pid)
                 {
@@ -550,7 +538,7 @@ void handle_list_process() // Çalışan programları listele
     printf("║  PID  ║     Command       ║   Mode   ║  Status   ║  Owner  ║   Time   ║\n");
     printf("╠═══════╬═══════════════════╬══════════╬═══════════╬═════════╬══════════╣\n");
     
-    for (int i = 0; i < 50; i++)
+    for (int i = 0; i < MAX_PROCESSES; i++)
     {
         if (shared_data->processes[i].is_active)
         {
@@ -588,7 +576,7 @@ void handle_terminate_process() // Program sonlandır
     // PID'nin yönetilen processler arasında olup olmadığını kontrol et
     sem_wait(sem);
     int found = 0;
-    for (int i = 0; i < 50; i++)
+    for (int i = 0; i < MAX_PROCESSES; i++)
     {
         if (shared_data->processes[i].pid == target_pid && 
             shared_data->processes[i].is_active)
@@ -610,7 +598,7 @@ void handle_terminate_process() // Program sonlandır
     {
         printf("Sent termination signal to PID %d\n", target_pid);
         sem_wait(sem); // Semaphore kilitle
-        for (int i = 0; i < 50; i++) // Paylaşılan bellekte ara
+        for (int i = 0; i < MAX_PROCESSES; i++) // Paylaşılan bellekte ara
         {
             if (shared_data->processes[i].pid == target_pid && 
                 shared_data->processes[i].is_active)
