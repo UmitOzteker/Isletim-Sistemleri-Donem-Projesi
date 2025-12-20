@@ -222,9 +222,19 @@ void sigint_handler(int signum)
     (void)signum; // Unused parameter uyarısını bastır
     interrupt_count++;
 
-    if(interrupt_count >= 3) {
-        running = 0; // Ana döngüyü durdur
-        printf("\n[Signal Handler] Received 3 SIGINTs. Exiting ProcX...\n");
+    if (interrupt_count == 1)
+    {
+        printf("\n[Handler] Caught SIGINT (1/3). Press Ctrl+C 2 more times to exit.\n");
+    }
+    else if (interrupt_count == 2)
+    {
+        printf("\n[Handler] Caught SIGINT (2/3). Press Ctrl+C 1 more time to exit.\n");
+    }
+    else
+    {
+        printf("\n[Handler] Caught SIGINT (3/3). Exiting now.\n");
+        cleanup_resources(); // Doğrudan kaynakları temizle
+        exit(0);             // Ve programdan hemen çık
     }
 }
 
@@ -232,8 +242,10 @@ void *monitor_thread(void *arg)
 {
     (void)arg;
     int status;
-    printf("[Monitor] Monitor thread started (PID: %d)\n", getpid());
-    
+
+    printf("\r\033[K[Monitor] Monitor thread started (PID: %d)\nSeçiminiz: ", getpid());
+    fflush(stdout);
+
     while (running)
     {
         sleep(2); // 2 saniye bekle
@@ -327,7 +339,9 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 { 
     (void)arg; 
     Message msg;
-    printf("\r\033[IPC Listener] IPC listener thread started (PID: %d)\nSeçiminiz:", getpid());
+
+    printf("\r\033[K[IPC Listener] IPC listener thread started (PID: %d)\nSeçiminiz: ", getpid());
+    fflush(stdout);
 
     while (running) // Ana döngü
     {
@@ -682,6 +696,7 @@ int main() // Ana fonksiyon
     printf("[Main] Press Ctrl+C to trigger the handler.\n");
 
     start_threads(&monitor_tid, &ipc_listener_tid); // İş parçacıklarını başlat
+    usleep(100000); // İş parçacıklarının başlaması için kısa bir gecikme
 
     printf("\nWelcome to ProcX - Process Management System\n");
 
