@@ -126,7 +126,7 @@ void init_resources() // Kaynakları başlat
         exit(1);
     }
 
-    shared_data = mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0); // Paylaşılan belleği eşleştir
+    shared_data = mmap(0, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0); // Paylaşılan bellek ram'e dahil edilir.
     if (shared_data == MAP_FAILED)
     {
         perror("mmap failed");
@@ -252,11 +252,11 @@ void *monitor_thread(void *arg)
         
         // Dizideki tüm processleri kontrol et
         for(int i = 0; i < MAX_PROCESSES; i++) { 
-            sem_wait(sem);
+            sem_wait(sem); // Semaphore kilitle
             
             // Sınır kontrolü ve aktiflik kontrolü
             if(!shared_data->processes[i].is_active) {
-                sem_post(sem);
+                sem_post(sem); // Hemen serbest bırak
                 continue;
             }
             
@@ -273,7 +273,7 @@ void *monitor_thread(void *arg)
                 }
             } else {
                 // Başka instance'ın processi - kill(0) ile kontrol et
-                if (kill(pid, 0) == -1 && errno == ESRCH) {
+                if (kill(pid, 0) == -1 && errno == ESRCH) { // Eğer bir süreç dışarıdan öldürülürse
                     is_dead = 1;
                 }
             }
@@ -307,7 +307,7 @@ void *monitor_thread(void *arg)
         
         // Zombie processleri topla
         pid_t result;
-        while ((result = waitpid(-1, &status, WNOHANG)) > 0) {
+        while ((result = waitpid(-1, &status, WNOHANG)) > 0) { // Herhangi bir child process öldüyse zombi olarak kalmasını önler
             sem_wait(sem);
             
             int found = 0;
@@ -427,7 +427,7 @@ void *ipc_listener_thread(void *arg) // IPC dinleyici iş parçacığı
 
 void start_process(char *command, int mode) // Yeni process başlat
 {
-    pid_t pid = fork();
+    pid_t pid = fork(); // Yeni process oluştur
     if (pid < 0)
     {
         perror("Fork failed");
@@ -438,7 +438,7 @@ void start_process(char *command, int mode) // Yeni process başlat
 
         if (mode == DETACHED)
         {
-            if (setsid() < 0)
+            if (setsid() < 0) // Terminal kapansa bile bu süreç arka planda çalışmaya devam eder (Daemonization)
             { // Terminalden kopar
                 perror("setsid failed");
                 exit(1);
@@ -450,7 +450,7 @@ void start_process(char *command, int mode) // Yeni process başlat
         command_copy[255] = '\0'; // Null terminator ekle
 
         char *args[] = {"/bin/sh", "-c", command_copy, NULL}; // Argüman dizisi
-        execvp(args[0], args);
+        execvp(args[0], args); // Mevcut ProcX kodunu çocuk süreçten siler ve yerine kullanıcının istediği komutu yükler
 
         perror("Exec failed");
         exit(1);
@@ -731,7 +731,7 @@ int main() // Ana fonksiyon
             printf("[Main] Exiting ProcX...\n");
             running = 0; // Döngüyü durdur
 
-            Message wake_msg;
+            Message wake_msg; // İzleme ve IPC iş parçacıklarını uyandırmak için mesaj gönder (Poison pill)
             wake_msg.msg_type = getpid(); // Alıcı: Benim kendi thread'im
             wake_msg.command = 0;         // Özel çıkış komutu
             wake_msg.sender_pid = getpid();
